@@ -1,0 +1,215 @@
+%% AuthenticSelf - UC-02-wishlist: PRD section 8 sequence diagrams
+%% Three public wishlist flows on one canvas, separated by rect/Note blocks:
+%%   (A) POST /api/v1/wishlist  - add, including idempotent + UNIQUE-race branches (FR-4 / FR-5 / AC-7 / AC-8 / AC-15)
+%%   (B) GET  /api/v1/wishlist  - list on mount + tab switch (FR-6 / AC-16..AC-21 / AC-39..AC-41)
+%%   (C) PATCH /api/v1/wishlist/{id} - state transitions + INVALID_STATE_TRANSITION (FR-7 / FR-10 / AC-22..AC-26 / AC-52)
+%%
+%% Source of truth:
+%%   src/mobile/src/screens/RecommendationScreen.tsx  (onAddToWishlist -> addToWishlist)
+%%   src/mobile/src/screens/WishlistScreen.tsx        (fetchOnce / onTogglePurchased / onDelete)
+%%   src/mobile/src/api/wishlist.ts                   (addToWishlist / getWishlist / updateWishlistState)
+%%   src/backend/src/main/java/com/authenticself/wishlist/WishlistController.java
+%%   src/backend/src/main/java/com/authenticself/wishlist/WishlistService.java
+%%   src/backend/src/main/java/com/authenticself/wishlist/WishlistPersistence.java
+%%   src/backend/src/main/resources/db/migration/V6__extend_wishlist_timestamps.sql
+%%
+%% PRD refs:
+%%   section 6 UC-02 (wishlist Active -> Purchased)
+%%   section 7 entity diagram (User 1-0..* Wishlist, Wishlist 0..*-1 Furniture)
+%%   section 8 sequence template (user -> frontend -> backend -> MySQL)
+
+sequenceDiagram
+    autonumber
+    actor User as User
+    participant Rec as RecommendationScreen (RN)<br/>ItemCard.onAddToWishlist<br/>FR-16 / AC-36..AC-38
+    participant Wish as WishlistScreen (RN)<br/>FR-17 / AC-39..AC-46
+    participant Api as api/wishlist.ts<br/>addToWishlist / getWishlist / updateWishlistState<br/>FR-15 / AC-35
+    participant Ctrl as WishlistController<br/>@RequestMapping /api/v1/wishlist<br/>FR-5..FR-8 / AC-7..AC-28
+    participant Svc as WishlistService<br/>@Service (no @Transactional)<br/>FR-4 / FR-7 / FR-10 / FR-11
+    participant Pers as WishlistPersistence<br/>@Component REQUIRES_NEW per op<br/>FR-3 / D-4
+    participant DB as MySQL wishlist + users + furniture<br/>uq_wishlist_user_furniture (V6)
+
+    Note over User,DB: Precondition - users row exists, furniture row exists (seeded by V5 in UC-01-recommendation).
+
+    %% ==========================================================
+    %% (A) POST /api/v1/wishlist  - add  (FR-4 / FR-5)
+    %% ==========================================================
+    rect rgba(204,229,255,0.30)
+    Note over Rec,DB: (A) Add-to-wishlist from RecommendationScreen - FR-4 / FR-5 / AC-7 / AC-8 / AC-15
+    User->>Rec: tap [위시리스트에 추가] on ItemCard
+    Rec->>Rec: emitWishlistAddClicked(roomId, furnitureId)<br/>analytics emit - AC-49 invariant
+    Rec->>Api: addToWishlist({baseUrl, userId, furnitureId, category, price})
+    Api->>Ctrl: POST /api/v1/wishlist<br/>header X-User-Id<br/>body {furnitureId, category, price}
+    Ctrl->>Ctrl: requireUserId -> else MISSING_USER_HEADER 400 (AC-14)
+    Ctrl->>Svc: add(userId, AddWishlistRequest)
+    Svc->>Svc: validate payload:<br/>furnitureId/category/price non-null,<br/>category in {desk,bed,chair,lighting},<br/>price >= 0<br/>else INVALID_WISHLIST_PAYLOAD 400 (AC-12 / AC-13)
+
+    Svc->>Pers: userExists(userId)
+    Pers->>DB: SELECT 1 FROM users WHERE user_id=?
+    DB-->>Pers: bool
+    alt user missing (AC-11)
+        Svc-->>Ctrl: throw WishlistException(USER_NOT_FOUND)
+        Ctrl-->>Api: 404 {errorCode, message, correlationId}
+    else user ok
+        Svc->>Pers: findFurniture(furnitureId)
+        Pers->>DB: SELECT * FROM furniture WHERE furniture_id=?
+        DB-->>Pers: Optional~Furniture~
+        alt furniture missing (AC-10)
+            Svc-->>Ctrl: throw WishlistException(FURNITURE_NOT_FOUND)
+            Ctrl-->>Api: 404 {errorCode, message, correlationId}
+        else furniture ok
+            Svc->>Pers: findByUserIdAndFurnitureId(userId, furnitureId)<br/>fast-path idempotency check
+            Pers->>DB: SELECT * FROM wishlist WHERE user_id=? AND furniture_id=?
+            DB-->>Pers: Optional~Wishlist~
+
+            alt existing row  (idempotent fast-path)  AC-8
+                Pers-->>Svc: Optional.of(row)
+                Svc-->>Ctrl: Outcome(body, created=false)<br/>log INFO op=add alreadyExists=true
+                Ctrl-->>Api: 200 WishlistItem{..., alreadyExists:true}<br/>status/addedAt/price unchanged
+                Api-->>Rec: AddWishlistResponse{alreadyExists:true, status:'Active' | 'Purchased'}
+                Rec->>User: Toast "이미 위시리스트에 있어요."<br/>OR "이미 구매 완료로 표시된 항목이에요."<br/>(dispatch on resp.status)
+            else no existing row  (slow path - INSERT)
+                Svc->>Svc: build Wishlist{wishlistId=UUID, status=Active, purchasedAt=null}
+                Svc->>Pers: insert(newRow) - REQUIRES_NEW
+                Pers->>DB: INSERT INTO wishlist (...)<br/>DB default fills added_at, created_at, updated_at
+
+                alt INSERT succeeds  AC-7
+                    DB-->>Pers: 1 row
+                    Pers->>DB: em.refresh(saved)<br/>re-read DB-populated timestamps
+                    DB-->>Pers: managed entity
+                    Pers-->>Svc: saved Wishlist
+                    Svc-->>Ctrl: Outcome(body, created=true)<br/>log INFO fromStatus=(none) toStatus=Active resultHttp=201
+                    Ctrl-->>Api: 201 WishlistItem{..., alreadyExists:false}
+                    Api-->>Rec: AddWishlistResponse{alreadyExists:false}
+                    Rec->>User: Toast "위시리스트에 담았어요."
+                else DataIntegrityViolationException  (UNIQUE race, AC-15)
+                    DB--xPers: uq_wishlist_user_furniture violation
+                    Pers--xSvc: DataIntegrityViolationException bubbles
+                    Svc->>Pers: findByUserIdAndFurnitureId(userId, furnitureId)<br/>re-read the WINNING row
+                    Pers->>DB: SELECT * FROM wishlist WHERE user_id=? AND furniture_id=?
+                    DB-->>Pers: winning row
+                    Pers-->>Svc: Optional.of(winner)
+                    Svc-->>Ctrl: Outcome(body, created=false)<br/>log INFO race=true alreadyExists=true
+                    Ctrl-->>Api: 200 WishlistItem{..., alreadyExists:true}
+                    Api-->>Rec: AddWishlistResponse{alreadyExists:true}
+                    Rec->>User: Toast "이미 위시리스트에 있어요."
+                end
+            end
+        end
+    end
+    end
+
+    Note over Rec,DB: NOTE - there is NO WISHLIST_ALREADY_EXISTS 409 error code in this design.<br/>Duplicates collapse to HTTP 200 + alreadyExists=true. WISHLIST_LIMIT_EXCEEDED 409 is reserved but unused (D-9 soft cap).
+
+    %% ==========================================================
+    %% (B) GET /api/v1/wishlist  - list + tab switch  (FR-6)
+    %% ==========================================================
+    rect rgba(212,237,218,0.30)
+    Note over Wish,DB: (B) List on mount + status filter - FR-6 / AC-16..AC-21 / AC-39..AC-41
+    User->>Wish: navigate to Wishlist (from HomeScreen btn-open-wishlist)
+    Wish->>Wish: useEffect(fetchOnce)<br/>setLoading(true)
+    Wish->>Api: getWishlist({baseUrl, userId})<br/>NO status filter (AC-39)
+    Api->>Ctrl: GET /api/v1/wishlist<br/>header X-User-Id
+    Ctrl->>Ctrl: requireUserId -> else MISSING_USER_HEADER 400
+    Ctrl->>Svc: list(userId, statusFilter=null)
+
+    Svc->>Pers: userExists(userId)
+    Pers->>DB: SELECT 1 FROM users WHERE user_id=?
+    DB-->>Pers: bool
+    alt user missing
+        Svc-->>Ctrl: throw WishlistException(USER_NOT_FOUND)
+        Ctrl-->>Api: 404 envelope
+    else user ok
+        Svc->>Svc: parseStatusFilter(null) -> null<br/>(AC-18 rejects unknown values as INVALID_WISHLIST_STATUS_FILTER 400)
+        Svc->>Pers: list(userId, filter=null, cap=maxItemsPerUser+1)
+        Pers->>DB: countByUserIdAndStatus(userId, Active)
+        DB-->>Pers: totalActive
+        Pers->>DB: countByUserIdAndStatus(userId, Purchased)
+        DB-->>Pers: totalPurchased
+        Pers->>DB: findAllByUserIdOrderByUpdatedAtDesc(userId)
+        DB-->>Pers: List~Wishlist~
+        Pers->>Pers: secondary sort by wishlistId ASC (tie-break)<br/>truncate to cap rows
+        Pers-->>Svc: ListSnapshot(rows, totalActive, totalPurchased)
+
+        Svc->>Svc: filter==null -> split Active-first + Purchased-tail (AC-17)
+        Svc->>Pers: findFurnitureByIds(distinct furnitureIds)<br/>one IN-query snapshot join
+        Pers->>DB: SELECT * FROM furniture WHERE furniture_id IN (...)
+        DB-->>Pers: Map~String, Furniture~
+        Pers-->>Svc: byId map
+        Svc-->>Ctrl: WishlistListResponse(items, totalActive, totalPurchased, truncated)
+        Ctrl-->>Api: 200 {items[], totalActive, totalPurchased, truncated}
+        Api->>Api: assertListResponse(body) - runtime shape check
+        Api-->>Wish: ListWishlistResponse
+        Wish->>Wish: setResp(data); split into activeItems + purchasedItems by item.status
+        Wish->>User: render tabs "보관 중 (N)" + "구매 완료 (M)"<br/>default tab = active (AC-40)
+    end
+    end
+
+    Note over Wish,Ctrl: Tab switch is LOCAL - tapping "구매 완료" calls setTab('purchased');<br/>no additional GET. The initial response already contains both states.
+
+    %% ==========================================================
+    %% (C) PATCH /api/v1/wishlist/{id} - state transition  (FR-7 / FR-10)
+    %% ==========================================================
+    rect rgba(255,243,205,0.35)
+    Note over Wish,DB: (C) PATCH Active -> Purchased and Purchased -> Active - FR-7 / FR-10 / AC-22..AC-26 / AC-52
+    User->>Wish: tap [구매 완료] on Active card
+    Wish->>Wish: Alert.alert confirm "구매 완료로 표시할까요?"
+    User->>Wish: tap [확인]
+    Wish->>Api: updateWishlistState({wishlistId, status:'PURCHASED'})
+    Api->>Ctrl: PATCH /api/v1/wishlist/{wishlistId}<br/>body {status:"PURCHASED"}
+    Ctrl->>Svc: patch(userId, wishlistId, "PURCHASED")
+
+    Svc->>Svc: parseTargetStatus("PURCHASED") -> Purchased<br/>(null/blank/unknown -> INVALID_STATE_TRANSITION 400, AC-25)
+    Svc->>Pers: findByWishlistIdAndUserId(wishlistId, userId)<br/>ownership-gated lookup
+    Pers->>DB: SELECT * FROM wishlist WHERE wishlist_id=? AND user_id=?
+    DB-->>Pers: Optional~Wishlist~
+    alt row missing or foreign ownership (AC-26)
+        Svc-->>Ctrl: throw WishlistException(WISHLIST_ITEM_NOT_FOUND)
+        Ctrl-->>Api: 404 envelope
+        Api-->>Wish: throw ApiError(404, {errorCode:'WISHLIST_ITEM_NOT_FOUND'})
+        Wish->>User: Toast "이미 삭제된 항목이에요." + void fetchOnce()
+    else owned row found
+        Svc->>Svc: from=row.status; target=Purchased
+        alt same-state PATCH  (AC-24 idempotent no-op)
+            Svc->>Pers: findFurniture(row.furnitureId)<br/>for response snapshot
+            Pers->>DB: SELECT * FROM furniture WHERE furniture_id=?
+            DB-->>Pers: Furniture
+            Svc-->>Ctrl: WishlistItemResponse (row unchanged - updated_at NOT touched)<br/>log INFO noop=true
+            Ctrl-->>Api: 200 WishlistItem
+        else real transition  Active -> Purchased  (AC-22 / AC-52)
+            Svc->>Svc: purchasedAt := LocalDateTime.now(UTC)
+            Svc->>Pers: updateStatus(wishlistId, Purchased, purchasedAt)
+            Pers->>DB: UPDATE wishlist SET status='Purchased', purchased_at=? WHERE wishlist_id=?
+            DB-->>Pers: managed entity (refreshed)
+            Pers-->>Svc: updated Wishlist
+            Svc->>Pers: findFurniture(row.furnitureId)
+            Pers-->>Svc: Furniture snapshot
+            Svc-->>Ctrl: WishlistItemResponse<br/>log INFO fromStatus=Active toStatus=Purchased
+            Ctrl-->>Api: 200 WishlistItem{..., status:'Purchased', purchasedAt:non-null}
+        end
+        Api-->>Wish: WishlistItem
+        Wish->>Wish: optimistic setResp - move card between arrays,<br/>recompute totalActive/totalPurchased, jump to Purchased tab (AC-41)
+        Wish->>User: card now under "구매 완료" tab
+    end
+
+    Note over Wish,DB: Reverse direction  Purchased -> Active  mirrors the above:<br/>Wish sends {status:'ACTIVE'}, Svc sets purchasedAt=null (AC-23 / AC-52 invariant).
+    Note over User,DB: INVALID_STATE_TRANSITION 400 (AC-25) fires for body.status not in {ACTIVE, PURCHASED}.<br/>Same-status PATCH is a 200 no-op, NOT an error.
+    end
+
+    %% ---------------------------------------------------------------
+    %% Legend (FR / AC traceability)
+    %% ---------------------------------------------------------------
+    %% RN addToWishlist wire-up in RecommendationScreen . FR-16 / AC-36..AC-38
+    %% RN getWishlist mount fetch ....................... FR-17 / AC-39..AC-41
+    %% RN updateWishlistState + optimistic move ......... FR-17 / AC-42..AC-43
+    %% POST idempotent fast-path (existing row -> 200) .. FR-4  / AC-8
+    %% POST fresh insert (-> 201) ....................... FR-4  / AC-7
+    %% POST UNIQUE-race catch + re-read (-> 200) ........ FR-4  / AC-15
+    %% GET filter parsing + INVALID_WISHLIST_STATUS_FILTER FR-6 / AC-18
+    %% GET Active-first ordering + tie-break ............ FR-6  / AC-17
+    %% PATCH state machine + purchasedAt set/clear ...... FR-7 / FR-10 / AC-22..AC-23 / AC-52
+    %% PATCH same-state no-op ........................... FR-7  / AC-24
+    %% PATCH unknown status -> INVALID_STATE_TRANSITION . FR-7  / AC-25
+    %% PATCH foreign ownership -> WISHLIST_ITEM_NOT_FOUND FR-7  / AC-26
+    %% MISSING_USER_HEADER on every endpoint ............ AC-14
+    %% DB UNIQUE (user_id, furniture_id) - V6 ........... FR-1  / AC-3 / AC-15

@@ -1,0 +1,63 @@
+plugins {
+    id 'org.springframework.boot' version '3.2.5'
+    id 'io.spring.dependency-management' version '1.1.4'
+    id 'java'
+}
+
+group = 'com.authenticself'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Core Spring Boot + JPA
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // Flyway migrations (MySQL dialect)
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-mysql'
+
+    // Runtime DB drivers
+    runtimeOnly 'com.mysql:mysql-connector-j'
+    // H2 available under the 'h2' Spring profile for fast CI migration checks.
+    runtimeOnly 'com.h2database:h2'
+
+    // Test stack
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+
+    // Testcontainers — authoritative migration test runs against real MySQL 8
+    testImplementation 'org.testcontainers:junit-jupiter:1.21.3'
+    testImplementation 'org.testcontainers:mysql:1.21.3'
+
+    // WireMock — stand-in for the Python AI service in Spring integration tests.
+    testImplementation 'org.wiremock:wiremock-standalone:3.5.4'
+
+    // Mockito is transitively pulled in by spring-boot-starter-test, but pinning
+    // keeps the AIOrchestrator unit tests stable across Boot bumps.
+    testImplementation 'org.mockito:mockito-core:5.11.0'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // On dev machines where the local Docker daemon is incompatible with
+    // Testcontainers' probe (e.g. Docker Desktop 4.68 WSL2 returning
+    // stubbed /info responses), setting -PskipTestcontainers=true excludes
+    // the integration suite that requires a live Docker engine.
+    if (project.hasProperty('skipTestcontainers')) {
+        exclude '**/migration/**'
+        exclude '**/admin/AdminConfigOverrideTest*'
+        exclude '**/admin/AdminLoggingPiiTest*'
+        exclude '**/admin/AdminOverviewIntegrationTest*'
+        exclude '**/admin/AdminOverviewRepositoryTest*'
+        exclude '**/wishlist/WishlistServiceConcurrencyTest*'
+        exclude '**/wishlist/WishlistStateMachineInvariantTest*'
+    }
+}

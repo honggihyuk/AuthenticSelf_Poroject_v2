@@ -1,0 +1,129 @@
+%% AuthenticSelf - AR-furniture-placement: component architecture (PRD section 9 slice)
+%% Shows the public surface of the AR feature end-to-end:
+%%   RN screens (new + modified) -> ARWebView wrapper -> bridge.ts types ->
+%%   WebView host -> placement.html -> <model-viewer> -> native AR overlay
+%% Every edge is annotated with the typed payload (bridge messages,
+%% navigation params, wishlist DTO). New Task-8 modules are dashed/blue;
+%% REUSED (Task-5 / Task-6) modules are solid grey.
+%%
+%% IMPORTANT: This task picked Option C per D-1. No Unity UaaL, no
+%% three.js-as-RN-native-module. Native AR launch happens OUTSIDE the
+%% WebView DOM in a platform AR surface (ARCore scene-viewer on Android,
+%% ARKit QuickLook on iOS, WebXR on desktop) - the edge from
+%% <model-viewer> to "Native AR overlay" is drawn accordingly.
+%%
+%% Sources of truth: see sequence.mmd header for the exhaustive list.
+%% PRD refs: section 4 (Unity AR Foundation - downgraded per D-1),
+%%           section 9 system architecture.
+
+flowchart LR
+    classDef new       fill:#eef4ff,stroke:#1f6feb,stroke-width:2px,color:#111
+    classDef reused    fill:#f2f2f2,stroke:#999,stroke-width:1px,color:#333
+    classDef asset     fill:#fff3cd,stroke:#b58a00,stroke-width:1.5px,color:#333
+    classDef external  fill:#e7e3f4,stroke:#5b4fa3,stroke-width:1px,color:#222,stroke-dasharray: 3 3
+    classDef native    fill:#ffe6f0,stroke:#c93d7a,stroke-width:1.5px,color:#222
+
+    %% ==============================================================
+    %% Layer 1 - RN native screens
+    %% ==============================================================
+    subgraph ClientRN [Layer 1 - React Native screens - src/mobile]
+        direction TB
+        App["App.tsx<br/>RootStackParamList.ARPlacement<br/>Stack.Screen appended 7th<br/>FR-2 / AC-8 / AC-18 / AC-40"]:::new
+        Rec["RecommendationScreen.tsx<br/>ItemCard.btn-ar-{fid} (additive)<br/>threads navigation prop<br/>FR-1 / AC-7 / AC-34..AC-36"]:::reused
+        Scr["ARPlacementScreen.tsx<br/>status machine + AR_ERROR_COPY<br/>DEFAULT_DIMENSIONS_BY_TYPE<br/>MODEL_URL_BY_TYPE<br/>WISHLIST_TOAST_COPY (dup per D-9)<br/>inlined fallback branch (deviation)<br/>FR-4..FR-10 / AC-17..AC-32 / AC-39"]:::new
+    end
+
+    %% ==============================================================
+    %% Layer 2 - Typed message bridge
+    %% ==============================================================
+    subgraph Bridge [Layer 2 - Message bridge]
+        direction TB
+        Br["bridge.ts<br/>AR_BRIDGE_VERSION = 1<br/>InboundARMessage | OutboundARMessage<br/>OutboundARErrorCode (4 codes)<br/>encodeInbound / decodeOutbound<br/>emitArFurniturePlaced (analytics stub)<br/>FR-3 / AC-9 / AC-19 / AC-43 / AC-30"]:::new
+        ArIdx["ar/index.ts<br/>barrel re-export"]:::new
+        Wv["ARWebView.tsx<br/>forwardRef wrapper<br/>props: sourceUri + onMessage + onDecodeError<br/>handle: inject(bridgeJson)<br/>testID='ar-webview' (AC-21)<br/>D-7 - testable shim"]:::new
+    end
+
+    %% ==============================================================
+    %% Layer 3 - WebView / HTML scene
+    %% ==============================================================
+    subgraph Web [Layer 3 - WebView host + HTML scene]
+        direction TB
+        WvRuntime["react-native-webview @ ~13.8.0<br/>FR-12 / AC-33<br/>NEW dependency in package.json"]:::new
+        Html["placement.html (bundled asset)<br/>viewport-fit=cover (AC-15)<br/>window.__authenticSelfBridgeLoad (AC-44)<br/>btn-place + btn-cancel (AC-11)<br/>ReactNativeWebView.postMessage (AC-16)<br/>FR-11 / AC-10..AC-16 / AC-42 / AC-44"]:::asset
+        Mv["&lt;model-viewer&gt; @ 3.5.0<br/>ar ar-modes='webxr scene-viewer quick-look'<br/>camera-controls touch-action='pan-y'<br/>AC-10 / AC-12 (pinned CDN)"]:::external
+        Cdn["ajax.googleapis.com/ajax/libs/<br/>model-viewer/3.5.0/model-viewer.min.js<br/>(only external URL - AC-42)"]:::external
+    end
+
+    %% ==============================================================
+    %% Layer 4 - Bundled assets
+    %% ==============================================================
+    subgraph Assets [Layer 4 - Bundled GLB assets]
+        direction TB
+        Glb["assets/ar/models/{desk,bed,chair,lighting}.glb<br/>128 B valid-magic placeholders (D-10)<br/>+ README.md upgrade-path note<br/>FR-13 / AC-13 / AC-14"]:::asset
+    end
+
+    %% ==============================================================
+    %% External - OS native AR surface (OUTSIDE WebView DOM)
+    %% ==============================================================
+    NativeAR["Native AR overlay<br/>ARCore scene-viewer (Android 7+ / Chrome 79+)<br/>ARKit QuickLook (iOS 13+)<br/>WebXR (desktop dev)<br/>D-6 platform matrix<br/>NOT part of the bridge - rendered outside WebView DOM"]:::native
+
+    %% ==============================================================
+    %% REUSED - UC-02 wishlist client (byte-unchanged)
+    %% ==============================================================
+    subgraph Reused [Reused - UC-02 / UC-01 surfaces - NOT modified by this task]
+        direction TB
+        Wl["api/wishlist.ts<br/>addToWishlist({baseUrl,userId,furnitureId,<br/>category,price}) → {alreadyExists,status}<br/>REUSED verbatim from UC-02 (AC-37)"]:::reused
+        Settings["settings.ts<br/>apiBaseUrl + userId stub<br/>REUSED"]:::reused
+        ApiErr["api/client.ts ApiError<br/>REUSED for FAIL_API branch"]:::reused
+    end
+
+    %% ==============================================================
+    %% Contract doc
+    %% ==============================================================
+    Contract["api_contract.yaml<br/>OpenAPI-shaped but paths: {}<br/>Bridge (non-HTTP) contract<br/>Inbound: ArLoadModelMessage / ArUnloadMessage<br/>Outbound: ArPlacedMessage / ArCancelledMessage / ArErrorMessage<br/>(+ reserved ArReadyMessage for v2)<br/>FR-18 / AC-38"]:::external
+
+    %% ==============================================================
+    %% Edges - Navigation
+    %% ==============================================================
+    Rec -- "navigation.navigate('ARPlacement',<br/>{ roomId: string, item: RecommendationItem })" --> App
+    App -- "render ARPlacementScreen<br/>with route.params" --> Scr
+
+    %% ==============================================================
+    %% Edges - RN <-> Bridge types
+    %% ==============================================================
+    Scr -- "import encodeInbound,<br/>AR_BRIDGE_VERSION,<br/>emitArFurniturePlaced" --> Br
+    Scr -- "ref=webviewRef<br/>onMessage=(OutboundARMessage)=>void<br/>onDecodeError=(raw,err)=>handleError('AR_SESSION_ERROR')" --> Wv
+    Wv -- "imports decodeOutbound +<br/>OutboundARMessage types" --> Br
+    ArIdx -. re-exports .- Br
+    ArIdx -. re-exports .- Wv
+
+    %% ==============================================================
+    %% Edges - Bridge <-> WebView host
+    %% ==============================================================
+    Wv -- "instantiates<br/>&lt;WebView source={{uri:...}}<br/>onMessage javaScriptEnabled/&gt;" --> WvRuntime
+    Wv -- "inject(json) =&gt;<br/>injectJavaScript('window.__authenticSelfBridgeLoad(...)')<br/>INBOUND: ArLoadModelMessage | ArUnloadMessage" --> Html
+    Html -- "window.ReactNativeWebView.postMessage(<br/>JSON.stringify(ArOutboundMessage))<br/>OUTBOUND: placed / cancelled / error" --> Wv
+
+    %% ==============================================================
+    %% Edges - HTML scene internals
+    %% ==============================================================
+    WvRuntime -- "loads asset:///ar/placement.html" --> Html
+    Html -- "contains<br/>&lt;model-viewer id='viewer' ar<br/>ar-modes='webxr scene-viewer quick-look'&gt;" --> Mv
+    Html -- "&lt;script type='module' src='...'&gt;<br/>(pinned version - AC-12)" --> Cdn
+    Cdn -. "defines" .-> Mv
+    Mv -- "viewer.setAttribute('src',<br/>asset:///ar/models/{type}.glb)" --> Glb
+    Mv -- "tap AR icon -&gt; dispatch to<br/>ar-modes platform surface" --> NativeAR
+    NativeAR -. "ar-status events<br/>(session-started / not-presenting / failed)" .-> Mv
+
+    %% ==============================================================
+    %% Edges - Wishlist handoff (reused)
+    %% ==============================================================
+    Scr -- "Alert '위시리스트에 추가' branch<br/>addToWishlist({furnitureId, category=item.type, price})" --> Wl
+    Wl -- "POST /api/v1/wishlist<br/>(NOT modified by this task - AC-37)" --> ApiErr
+    Scr -. reads .- Settings
+
+    %% ==============================================================
+    %% Edges - Contract doc
+    %% ==============================================================
+    Br -. documented by .- Contract
+    Html -. documented by .- Contract

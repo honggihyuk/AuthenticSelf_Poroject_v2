@@ -1,0 +1,134 @@
+%% AuthenticSelf - UC-03-admin-overview: aggregation flow per tile
+%% Shows how each of the four tiles composes its payload from
+%% AdminOverviewRepository results, including the window predicate
+%% propagation, the zero-fill / dense-date logic, and the invariants.
+%%
+%% Source of truth:
+%%   src/backend/src/main/java/com/authenticself/admin/AdminOverviewService.java
+%%     .buildUsersTile / .buildRoomsTile / .buildWishlistTile / .buildSalesTile
+%%     .densifyDateCount / .densifyDateKrw
+%%   src/backend/src/main/java/com/authenticself/admin/AdminOverviewRepository.java
+%%   src/backend/src/main/java/com/authenticself/admin/WindowResolver.java
+%%
+%% Anchors: FR-5..FR-10 / AC-12..AC-25 / AC-31 / AC-32 / AC-34 / AC-35 / AC-50.
+
+flowchart TB
+    classDef input     fill:#e2e3e5,stroke:#6c757d,stroke-width:1.5px,color:#111
+    classDef repo      fill:#eef4ff,stroke:#1f6feb,stroke-width:2px,color:#111
+    classDef svc       fill:#d4edda,stroke:#28a745,color:#155724,stroke-width:1.5px
+    classDef dto       fill:#fff3cd,stroke:#b58a00,color:#333
+    classDef inv       fill:#f8d7da,stroke:#b02a37,color:#4c1d1d,stroke-dasharray: 3 3
+
+    %% ------------------------------------------------------------------
+    %% Shared window pipeline
+    %% ------------------------------------------------------------------
+    In["TimeWindow enum<br/>{ LAST_7D | LAST_30D | ALL }<br/>(FR-4 / AC-10 / AC-11)"]:::input
+    WR["WindowResolver.resolve(window)<br/>LAST_7D  -> today(KST).minusDays(7).atStartOfDay.toInstant()<br/>LAST_30D -> today(KST).minusDays(30).atStartOfDay.toInstant()<br/>ALL      -> null<br/>(FR-10 / D-4 / AC-32)"]:::svc
+    WSNote["Every repository method uses:<br/>WHERE (:windowStart IS NULL OR col &gt;= :windowStart)<br/>- idempotent idiom so one SQL body handles both<br/>no-window and windowed cases (AC-31)"]:::inv
+
+    In --> WR --> Svc[AdminOverviewService]
+    WR --- WSNote
+
+    %% ==================================================================
+    %% (1) Users tile - FR-5 / AC-12..AC-15
+    %% ==================================================================
+    subgraph UsersT [Users tile - FR-5 / AC-12..AC-15]
+        direction TB
+        UR1[/countUsersInRoleAndWindow('USER', ws)<br/>COUNT(*) FROM users WHERE role='USER' AND (ws IS NULL OR created_at&gt;=ws)/]:::repo
+        UR2[/countUsersInRoleAndWindow('ADMIN', ws)<br/>COUNT(*) FROM users WHERE role='ADMIN' AND (ws IS NULL OR created_at&gt;=ws)/]:::repo
+        UR3[/countNewSignups(ws)<br/>COUNT(*) FROM users WHERE (ws IS NULL OR created_at&gt;=ws)/]:::repo
+        UR4[/countActiveUsers(ws)<br/>COUNT(DISTINCT user_id) FROM spaces WHERE (ws IS NULL OR uploaded_at&gt;=ws)<br/>active-user = uploaded photo in window/]:::repo
+        UR5[/groupSignupsByDayRaw(ws, '+09:00')<br/>SELECT DATE(CONVERT_TZ(created_at,'+00:00','+09:00')) day, COUNT(*)<br/>FROM users GROUP BY day ORDER BY day ASC/]:::repo
+        UR6[/minUserCreatedAt()<br/>SELECT MIN(created_at) FROM users<br/>- fallback earliest for window=ALL/]:::repo
+        UD["densifyDateCount(rawRows, ws, fallbackEarliest)<br/>from = ws!=null ? ws.toLocalDate() : fallbackEarliest.toLocalDate()<br/>to   = today(KST)<br/>zero-fill every calendar day in [from, to] (AC-15)<br/>window=ALL with empty users -&gt; empty array"]:::svc
+        UU["new UsersTile(totalUsers, totalAdmins,<br/>newSignups, activeUsers, signupsByDay)"]:::dto
+        UR1 --> UU
+        UR2 --> UU
+        UR3 --> UU
+        UR4 --> UU
+        UR5 --> UD --> UU
+        UR6 --> UD
+    end
+    Svc --> UsersT
+
+    %% ==================================================================
+    %% (2) Rooms tile - FR-6 / AC-16..AC-19 / AC-34 / AC-35 / AC-50
+    %% ==================================================================
+    subgraph RoomsT [Rooms tile - FR-6 / AC-16..AC-19 / AC-34 / AC-35]
+        direction TB
+        RR1[/countSpaces(ws)<br/>COUNT(*) FROM spaces WHERE (ws IS NULL OR uploaded_at&gt;=ws)/]:::repo
+        RR2[/countSpacesByStatusRaw(ws)<br/>SELECT status, COUNT(*) FROM spaces GROUP BY status/]:::repo
+        RR3[/countSpacesByStyleRaw(ws)<br/>SELECT style, COUNT(*) FROM spaces<br/>WHERE style IS NOT NULL GROUP BY style<br/>- NULL-style rows EXCLUDED (AC-35)/]:::repo
+        RR4[/topMainColorsRaw(ws, topColorsLimit=5)<br/>SELECT main_color, COUNT(*) FROM spaces<br/>WHERE main_color IS NOT NULL<br/>GROUP BY main_color<br/>ORDER BY cnt DESC, color ASC<br/>LIMIT :lim<br/>- tie-break color ASC deterministic (AC-50)/]:::repo
+
+        RZ1["EnumMap~Space.Status, Long~<br/>zero-fill every Space.Status.values()<br/>(AC-16 / AC-34)"]:::svc
+        RZ2["EnumMap~Style, Long~<br/>zero-fill every Style.values()<br/>sum of styleDist &lt;= totalSpaces<br/>(strict &lt; possible due to AC-35)"]:::svc
+        RZ3["topColors = rows -&gt; ColorCount(#hex, cnt)<br/>NO padding when distinct colors &lt; limit<br/>(AC-19 / AC-49)"]:::svc
+
+        RU["new RoomsTile(totalSpaces,<br/>statusDistribution, styleDistribution, mainColorTop5)"]:::dto
+
+        RR1 --> RU
+        RR2 --> RZ1 --> RU
+        RR3 --> RZ2 --> RU
+        RR4 --> RZ3 --> RU
+    end
+    Svc --> RoomsT
+
+    RoomsInv["INVARIANTS:<br/>sum(statusDistribution) == totalSpaces  (AC-18 exact equality)<br/>sum(styleDistribution)  &lt;= totalSpaces  (AC-17 / AC-35 - NULL style excl.)"]:::inv
+    RoomsT --- RoomsInv
+
+    %% ==================================================================
+    %% (3) Wishlist tile - FR-7 / AC-20 / AC-21
+    %% ==================================================================
+    subgraph WishT [Wishlist tile - FR-7 / AC-20 / AC-21]
+        direction TB
+        WR1[/countWishlist(ws)<br/>COUNT(*) FROM wishlist WHERE (ws IS NULL OR added_at&gt;=ws)/]:::repo
+        WR2[/countWishlistByStatusRaw(ws)<br/>SELECT status, COUNT(*) FROM wishlist GROUP BY status<br/>DB casing: Active / Purchased/]:::repo
+        WR3[/countWishlistByCategoryRaw(ws)<br/>SELECT category, COUNT(*) FROM wishlist GROUP BY category/]:::repo
+
+        WZ1["seed statusDist:<br/>{ACTIVE:0, PURCHASED:0}<br/>translate 'Purchased' -&gt; 'PURCHASED'<br/>translate 'Active'    -&gt; 'ACTIVE'<br/>(FR-7 wire casing)"]:::svc
+        WZ2["seed catDist:<br/>{desk:0, bed:0, chair:0, lighting:0}<br/>drop keys not in the 4-value set"]:::svc
+        WCR["conversionRate =<br/>total==0 ? 0.0<br/>           : round(PURCHASED/total, 2 dp)<br/>divide-by-zero guard (AC-21)"]:::svc
+
+        WU["new WishlistTile(total,<br/>statusDistribution, categoryDistribution, conversionRate)"]:::dto
+
+        WR1 --> WU
+        WR1 --> WCR
+        WR2 --> WZ1 --> WU
+        WZ1 --> WCR --> WU
+        WR3 --> WZ2 --> WU
+    end
+    Svc --> WishT
+
+    WishInv["INVARIANTS:<br/>sum(statusDistribution) == totalItems    (AC-20)<br/>sum(categoryDistribution) == totalItems  (AC-20)<br/>0.0 &lt;= conversionRate &lt;= 1.0            (AC-21)"]:::inv
+    WishT --- WishInv
+
+    %% ==================================================================
+    %% (4) Sales tile - FR-8 / AC-22..AC-25 / AC-23 snapshot invariant
+    %% ==================================================================
+    subgraph SalesT [Sales tile - FR-8 / AC-22..AC-25]
+        direction TB
+        SR1[/sumSalesKrw(ws)<br/>SELECT COALESCE(SUM(price),0) FROM wishlist<br/>WHERE status='Purchased' AND purchased_at IS NOT NULL<br/>AND (ws IS NULL OR purchased_at&gt;=ws)<br/>*price* = wishlist.price snapshot (AC-23)/]:::repo
+        SR2[/countPurchasedItems(ws)<br/>COUNT(*) FROM wishlist WHERE status='Purchased'<br/>AND purchased_at IS NOT NULL AND (ws IS NULL OR purchased_at&gt;=ws)/]:::repo
+        SR3[/sumSalesByCategoryRaw(ws)<br/>SELECT category, COALESCE(SUM(price),0) FROM wishlist<br/>WHERE status='Purchased' AND purchased_at IS NOT NULL<br/>GROUP BY category/]:::repo
+        SR4[/sumSalesByDayRaw(ws, '+09:00')<br/>SELECT DATE(CONVERT_TZ(purchased_at,'+00:00','+09:00')) day,<br/>       COALESCE(SUM(price),0) krw<br/>FROM wishlist WHERE status='Purchased' ... GROUP BY day/]:::repo
+        SR5[/minPurchasedAt()<br/>SELECT MIN(purchased_at) FROM wishlist WHERE status='Purchased'<br/>- fallback earliest for window=ALL/]:::repo
+
+        SAVG["averageOrderKrw =<br/>count==0 ? 0<br/>        : Math.round((double)totalKrw / count)"]:::svc
+        SZ1["seed byCat:<br/>{desk:0, bed:0, chair:0, lighting:0}<br/>sum == totalSalesKrw (AC-22)"]:::svc
+        SD["densifyDateKrw(rawRows, ws, minPurchasedAt)<br/>dense ascending range, zero-fill gaps (AC-25)<br/>window=ALL with zero purchases -&gt; empty array"]:::svc
+
+        SU["new SalesTile(totalKrw, count, averageKrw,<br/>salesByCategory, salesByDay)"]:::dto
+
+        SR1 --> SU
+        SR1 --> SAVG
+        SR2 --> SAVG --> SU
+        SR2 --> SU
+        SR3 --> SZ1 --> SU
+        SR4 --> SD --> SU
+        SR5 --> SD
+    end
+    Svc --> SalesT
+
+    SalesInv["INVARIANTS:<br/>sum(salesByCategory) == totalSalesKrw  (AC-22)<br/>totalSalesKrw uses wishlist.price (snapshot), NOT furniture.price (AC-23)<br/>Active rows (purchased_at IS NULL) EXCLUDED (AC-24)"]:::inv
+    SalesT --- SalesInv

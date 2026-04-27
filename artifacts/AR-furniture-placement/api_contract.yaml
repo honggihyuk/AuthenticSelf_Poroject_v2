@@ -1,0 +1,226 @@
+# =============================================================================
+# AR-furniture-placement bridge contract (NOT an HTTP API).
+#
+# This document describes the typed, versioned message bridge between the
+# React-Native host (`ARPlacementScreen.tsx` + `ARWebView.tsx`) and the
+# embedded HTML scene (`src/mobile/assets/ar/placement.html`).
+#
+# No new HTTP endpoint is introduced by this task (FR-17 / FR-18 / AC-37).
+# The file is shaped like OpenAPI 3.0.3 to keep the format familiar for
+# reviewers, but `paths: {}` is intentionally empty — every contract item
+# lives under `components.schemas`.
+#
+# Transport layer:
+#   - Inbound  (RN -> scene): `WebView.injectJavaScript`, invokes
+#     `window.__authenticSelfBridgeLoad(JSON.stringify(<InboundMessage>))`.
+#   - Outbound (scene -> RN): `window.ReactNativeWebView.postMessage(
+#     JSON.stringify(<OutboundMessage>))`.
+#
+# Versioning:
+#   - Every message carries `bridgeVersion: 1`. The RN-side `decodeOutbound`
+#     rejects any other value with a thrown Error. A future bump is a
+#     breaking-change task.
+# =============================================================================
+
+openapi: 3.0.3
+info:
+  title: AuthenticSelf AR Placement Bridge (non-HTTP)
+  version: "1.0.0"
+  description: |
+    Bridge message contract between the RN host and the `<model-viewer>`
+    HTML scene. Not served over HTTP; referenced by
+    `src/mobile/src/ar/bridge.ts` (TypeScript) and
+    `src/mobile/assets/ar/placement.html` (vanilla JS).
+
+paths: {}
+
+components:
+  schemas:
+    # -------------------------------------------------------------------------
+    # Shared
+    # -------------------------------------------------------------------------
+
+    BridgeVersion:
+      type: integer
+      description: Must always be the literal 1 for this iteration.
+      enum: [1]
+
+    ArErrorCode:
+      type: string
+      description: Client-side error codes emitted by the HTML scene.
+      enum:
+        - AR_NOT_SUPPORTED
+        - AR_CAMERA_DENIED
+        - AR_MODEL_LOAD_FAILED
+        - AR_SESSION_ERROR
+
+    Pose:
+      type: object
+      description: |
+        Placement pose. In v1 all fields are zero (FR-11 note); a future
+        task may populate these from `<model-viewer>`'s camera state.
+      required: [x, y, z, yaw]
+      properties:
+        x:   { type: number, format: float, description: World-space metres. }
+        y:   { type: number, format: float }
+        z:   { type: number, format: float }
+        yaw: { type: number, format: float, description: Radians. }
+
+    RoomDimensions:
+      type: object
+      description: |
+        Approximate room dimensions in metres. Resolved RN-side from a
+        per-type default tuple (FR-4). Null is permissible but v1 always
+        populates the field.
+      required: [widthM, lengthM, heightM]
+      properties:
+        widthM:  { type: number, format: float, minimum: 0.01 }
+        lengthM: { type: number, format: float, minimum: 0.01 }
+        heightM: { type: number, format: float, minimum: 0.01 }
+
+    # -------------------------------------------------------------------------
+    # Inbound (RN -> scene)
+    # -------------------------------------------------------------------------
+
+    ArLoadModelMessage:
+      type: object
+      description: |
+        Tells the scene which GLB to render. RN calls
+        `webview.inject(encodeInbound(loadMsg))` once on mount.
+      required: [bridgeVersion, event, furnitureId, modelUrl, roomDimensions, colorHex]
+      properties:
+        bridgeVersion: { $ref: '#/components/schemas/BridgeVersion' }
+        event:
+          type: string
+          enum: [load]
+        furnitureId:
+          type: string
+          description: Stable catalog identifier.
+        modelUrl:
+          type: string
+          description: |
+            Bundled-asset URL (`asset:///ar/models/{type}.glb` on RN).
+            Per-type lookup table lives in `ARPlacementScreen.tsx`.
+        roomDimensions:
+          oneOf:
+            - $ref: '#/components/schemas/RoomDimensions'
+            - type: "null"
+        colorHex:
+          oneOf:
+            - { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+            - type: "null"
+
+    ArUnloadMessage:
+      type: object
+      description: |
+        Sent on ARPlacementScreen unmount (FR-10). The scene clears the
+        <model-viewer> src + disables its overlay.
+      required: [bridgeVersion, event]
+      properties:
+        bridgeVersion: { $ref: '#/components/schemas/BridgeVersion' }
+        event:
+          type: string
+          enum: [unload]
+
+    # -------------------------------------------------------------------------
+    # Outbound (scene -> RN)
+    # -------------------------------------------------------------------------
+
+    ArReadyMessage:
+      type: object
+      description: |
+        Future extension — not emitted in v1. Reserved for the scene to
+        signal "webview loaded + <model-viewer> ready" separately from
+        the `ar-status` event. Included in the contract so v2 can add it
+        without bumping `bridgeVersion`.
+      required: [bridgeVersion, event]
+      properties:
+        bridgeVersion: { $ref: '#/components/schemas/BridgeVersion' }
+        event:
+          type: string
+          enum: [ready]
+
+    ArPlacedMessage:
+      type: object
+      description: |
+        User tapped "배치 완료" on the HTML overlay. RN surfaces an
+        Alert offering "위시리스트에 추가" / "닫기" (FR-7).
+      required: [bridgeVersion, event, pose]
+      properties:
+        bridgeVersion: { $ref: '#/components/schemas/BridgeVersion' }
+        event:
+          type: string
+          enum: [placed]
+        pose: { $ref: '#/components/schemas/Pose' }
+
+    ArCancelledMessage:
+      type: object
+      description: |
+        User tapped "취소" on the HTML overlay. RN calls
+        `navigation.goBack()` without any Alert (FR-8).
+      required: [bridgeVersion, event]
+      properties:
+        bridgeVersion: { $ref: '#/components/schemas/BridgeVersion' }
+        event:
+          type: string
+          enum: [cancelled]
+
+    ArErrorMessage:
+      type: object
+      description: |
+        Scene-side error. RN renders the Korean fallback panel keyed by
+        `errorCode` (FR-6 / AC-26).
+      required: [bridgeVersion, event, errorCode]
+      properties:
+        bridgeVersion: { $ref: '#/components/schemas/BridgeVersion' }
+        event:
+          type: string
+          enum: [error]
+        errorCode: { $ref: '#/components/schemas/ArErrorCode' }
+        message:
+          type: string
+          description: Human-readable detail (optional; not surfaced to the user).
+
+    # Convenience unions — generators can pick which side to emit.
+    ArInboundMessage:
+      oneOf:
+        - $ref: '#/components/schemas/ArLoadModelMessage'
+        - $ref: '#/components/schemas/ArUnloadMessage'
+      discriminator:
+        propertyName: event
+
+    ArOutboundMessage:
+      oneOf:
+        - $ref: '#/components/schemas/ArReadyMessage'
+        - $ref: '#/components/schemas/ArPlacedMessage'
+        - $ref: '#/components/schemas/ArCancelledMessage'
+        - $ref: '#/components/schemas/ArErrorMessage'
+      discriminator:
+        propertyName: event
+
+# -----------------------------------------------------------------------------
+# Extensions (non-standard; informative only).
+# -----------------------------------------------------------------------------
+
+x-bridge-transport:
+  inbound:
+    mechanism: "WebView.injectJavaScript"
+    hook: "window.__authenticSelfBridgeLoad"
+  outbound:
+    mechanism: "window.ReactNativeWebView.postMessage"
+    consumer: "ARWebView.onMessage (decodeOutbound)"
+
+x-bridge-version-policy: |
+  Every message MUST carry `bridgeVersion: 1`. RN-side `decodeOutbound`
+  throws on mismatch. Future bump is a breaking-change task; the
+  fallback plan is a dual-version decoder that accepts both for one
+  release cycle.
+
+x-assets:
+  placementHtml: "src/mobile/assets/ar/placement.html"
+  modelGlb:
+    desk:     "src/mobile/assets/ar/models/desk.glb"
+    bed:      "src/mobile/assets/ar/models/bed.glb"
+    chair:    "src/mobile/assets/ar/models/chair.glb"
+    lighting: "src/mobile/assets/ar/models/lighting.glb"
+  modelViewerCdn: "https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"

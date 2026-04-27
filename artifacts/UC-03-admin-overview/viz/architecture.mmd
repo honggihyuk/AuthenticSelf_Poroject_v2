@@ -1,0 +1,148 @@
+%% AuthenticSelf - UC-03-admin-overview: component architecture (PRD section 9 slice)
+%% Backend-only (D-2 / FR-15 / AC-43 / AC-52) - NO RN admin screen, NO admin web SPA.
+%% HTTP client -> AdminController -> Authorizer / WindowResolver / Service -> Repository -> MySQL tables.
+%% Every edge is annotated with the DTO / route / SQL it carries.
+%% NEW Task-7 modules are dashed/blue; REUSED Task-1..6 modules are solid grey.
+
+flowchart LR
+    classDef new       fill:#eef4ff,stroke:#1f6feb,stroke-width:2px,color:#111
+    classDef reused    fill:#f2f2f2,stroke:#999,stroke-width:1px,color:#333
+    classDef db        fill:#fff3cd,stroke:#b58a00,stroke-width:1.5px,color:#333
+    classDef contract  fill:#e7e3f4,stroke:#5b4fa3,stroke-width:1px,color:#222,stroke-dasharray: 3 3
+    classDef nocode    fill:#f8d7da,stroke:#b02a37,stroke-width:1.5px,color:#4c1d1d,stroke-dasharray: 4 3
+
+    %% ==============================================================
+    %% Client layer - HTTP tool only (no admin client this iteration)
+    %% ==============================================================
+    subgraph Client [HTTP client - D-2 / FR-15 / AC-43 / AC-52]
+        direction TB
+        Ops["curl / Postman<br/>manual ops tooling<br/>emits X-User-Id header"]:::contract
+        NoRN["RN admin screen<br/>(NOT BUILT)<br/>deferred to UC-03-admin-client"]:::nocode
+        NoWeb["Admin web SPA<br/>(NOT BUILT)<br/>deferred to UC-03-admin-client"]:::nocode
+    end
+
+    %% ==============================================================
+    %% Wire format - OpenAPI contract
+    %% ==============================================================
+    Contract["api_contract.yaml<br/>GET /api/v1/admin/overview<br/>GET /api/v1/admin/users<br/>GET /api/v1/admin/rooms<br/>GET /api/v1/admin/wishlist<br/>GET /api/v1/admin/sales<br/>SpringErrorResponse envelope<br/>FR-12 / AC-36..AC-38 / AC-46"]:::contract
+
+    Ops == "fetch( ) with<br/>X-User-Id header<br/>+ ?window=LAST_7D|LAST_30D|ALL" ==> Contract
+
+    %% ==============================================================
+    %% Backend - Spring (com.authenticself.admin package)
+    %% ==============================================================
+    subgraph Backend [Spring Boot backend - com.authenticself.admin]
+        direction TB
+        Ctrl["AdminController<br/>@RestController @RequestMapping(/api/v1/admin)<br/>@CrossOrigin(GET,OPTIONS)<br/>5 handlers: overview/users/rooms/wishlist/sales<br/>FR-4..FR-8 / AC-8 / AC-9"]:::new
+
+        Auth["AdminAuthorizer<br/>@Component requireAdmin(userIdHeader)<br/>three-stage throw order<br/>1) null/blank -> MISSING_USER_HEADER<br/>2) absent -> USER_NOT_FOUND<br/>3) role != ADMIN -> NOT_ADMIN<br/>FR-3 / AC-7 / AC-26 / AC-27"]:::new
+
+        TW["TimeWindow enum + parse<br/>{ LAST_7D, LAST_30D, ALL }<br/>case-insensitive, default ALL<br/>bad value -> INVALID_TIME_WINDOW<br/>FR-4 / D-4 / AC-10 / AC-11"]:::new
+
+        WR["WindowResolver<br/>@Component resolve(TimeWindow) -> Instant<br/>Clock + Asia/Seoul, midnight-aligned<br/>LAST_*  -> today-N at 00:00 KST<br/>ALL     -> null<br/>FR-10 / AC-32"]:::new
+
+        Clk["Clock bean (TimeConfig)<br/>Clock.system(Asia/Seoul)<br/>NOT @Primary - tests override<br/>via @TestConfiguration @Primary<br/>FR-10 / FR-14 / AC-32"]:::new
+
+        Svc["AdminOverviewService<br/>@Service (no @Transactional)<br/>overview / users / rooms /<br/>wishlist / sales<br/>+ buildUsersTile / buildRoomsTile /<br/>  buildWishlistTile / buildSalesTile<br/>+ densifyDateCount / densifyDateKrw<br/>FR-10 / AC-32 / AC-51"]:::new
+
+        Advice["AdminExceptionAdvice<br/>@RestControllerAdvice basePackages=admin<br/>@Order(HIGHEST_PRECEDENCE)<br/>handleAdmin + handleMissingHeader<br/>emits shared ErrorResponse envelope<br/>FR-11 / AC-29 / AC-47"]:::new
+
+        Err["AdminErrorCode enum<br/>MISSING_USER_HEADER  (400, reused value)<br/>INVALID_TIME_WINDOW  (400, NEW)<br/>USER_NOT_FOUND       (404, reused value)<br/>NOT_ADMIN            (403, NEW)<br/>FR-11 / AC-28"]:::new
+
+        Exc["AdminException<br/>RuntimeException(code)"]:::new
+
+        Repo["AdminOverviewRepository<br/>JpaRepository~User,String~<br/>(marker aggregate root - never used)<br/>14 native @Query methods:<br/>countUsersInRoleAndWindow / countNewSignups /<br/>countActiveUsers / groupSignupsByDayRaw /<br/>minUserCreatedAt /<br/>countSpaces / countSpacesByStatusRaw /<br/>countSpacesByStyleRaw / topMainColorsRaw /<br/>countWishlist / countWishlistByStatusRaw /<br/>countWishlistByCategoryRaw /<br/>sumSalesKrw / countPurchasedItems /<br/>sumSalesByCategoryRaw / sumSalesByDayRaw /<br/>minPurchasedAt<br/>FR-9 / AC-30 / AC-31"]:::new
+
+        URepo["UserRepository<br/>(reused Task-1)<br/>findById used by AdminAuthorizer only"]:::reused
+
+        EntU["User @Entity<br/>+ NEW Role enum { USER, ADMIN }<br/>+ NEW @Enumerated(STRING) role field<br/>(additive extension, AC-6)"]:::new
+
+        Err2["ErrorResponse record<br/>{ errorCode, message, correlationId }<br/>(reused shared envelope, AC-47)"]:::reused
+
+        Cfg["application.yml<br/>app.admin.time-zone: 'Asia/Seoul'<br/>app.admin.top-colors-limit: 5<br/>FR-14 / AC-42 / AC-49"]:::new
+
+        DTO["dto/* records<br/>AdminOverviewResponse /<br/>{Users,Rooms,Wishlist,Sales}Tile /<br/>{Users,Rooms,Wishlist,Sales}TileResponse /<br/>DateCount / DateKrw / ColorCount<br/>AC-9 / AC-33 / AC-53"]:::new
+    end
+
+    Contract == "HTTP 1.1, application/json" ==> Ctrl
+
+    Ctrl -- "requireAdmin(userId) first statement" --> Auth
+    Ctrl -- "TimeWindow.parse(windowRaw)" --> TW
+    Ctrl -- "service.overview/users/rooms/wishlist/sales(userId, window)" --> Svc
+    Ctrl -. "throws AdminException" .-> Advice
+
+    Auth -- "findById(userIdHeader)" --> URepo
+    Auth -. "throws AdminException" .-> Advice
+    TW   -. "throws AdminException" .-> Advice
+
+    Svc -- "resolve(TimeWindow) -> Instant ws" --> WR
+    Svc -- "14 aggregation method calls (per tile)" --> Repo
+    Svc -. "@Value app.admin.time-zone / top-colors-limit" .-> Cfg
+    Svc -- "returns DTO records" --> DTO
+
+    WR -- "Clock + ZoneId.of('Asia/Seoul')" --> Clk
+
+    URepo -- "maps" --> EntU
+    Advice -- "new ErrorResponse(code.name, msg, corr)" --> Err2
+    Advice -- "code, httpStatus, defaultMessage" --> Err
+    Exc --> Err
+
+    %% ==============================================================
+    %% Data layer - MySQL 8
+    %% ==============================================================
+    subgraph Data [MySQL 8]
+        direction TB
+        TblU[("users table<br/>PK user_id<br/>+ NEW role ENUM('USER','ADMIN') (V7)<br/>+ NEW idx_users_role (V7)<br/>Task-1 V1 + Task-7 V7<br/>AC-1..AC-5")]:::new
+        TblS[("spaces table<br/>uploaded_at / status / style / main_color<br/>(reused Task-2 V2 + Task-3)")]:::reused
+        TblW[("wishlist table<br/>added_at / purchased_at / status / price / category<br/>(reused Task-6 V6)")]:::reused
+        TblF[("furniture table<br/>(reused Task-5 V4/V5)<br/>NOT read by aggregation queries -<br/>wishlist.price is the snapshot, AC-23)")]:::reused
+
+        Mig["db/migration/V7__add_users_role.sql<br/>ALTER TABLE users ADD role ENUM...<br/>CREATE INDEX idx_users_role<br/>header-comment bootstrap:<br/>UPDATE users SET role='ADMIN' WHERE email=?<br/>FR-1 / AC-1..AC-4"]:::new
+        MigPrev["V1..V6 migrations (immutable)<br/>FR-13 / AC-5"]:::reused
+    end
+
+    EntU -. "@Table(name='users')" .-> TblU
+    Mig --> TblU
+    MigPrev --> TblU
+    MigPrev --> TblS
+    MigPrev --> TblW
+    MigPrev --> TblF
+
+    Repo -- "Users tile: SELECT ... FROM users WHERE role=? AND (ws IS NULL OR created_at >= ws)" --> TblU
+    Repo -- "Users.activeUsers: SELECT COUNT(DISTINCT user_id) FROM spaces WHERE uploaded_at >= ws" --> TblS
+    Repo -- "Rooms tile: SELECT ... FROM spaces WHERE uploaded_at >= ws GROUP BY status/style/main_color" --> TblS
+    Repo -- "Wishlist tile: SELECT ... FROM wishlist WHERE added_at >= ws GROUP BY status/category" --> TblW
+    Repo -- "Sales tile: SELECT ... FROM wishlist WHERE status='Purchased' AND purchased_at >= ws<br/>(snapshot wishlist.price, AC-23 - NOT furniture.price)" --> TblW
+
+    %% ==============================================================
+    %% Deferred surfaces (explicitly not built this iteration)
+    %% ==============================================================
+    NoRN -. "NOT wired" .- Contract
+    NoWeb -. "NOT wired" .- Contract
+    Ops -->|"only live consumer"| Contract
+
+    %% ==============================================================
+    %% Legend
+    %% ==============================================================
+    subgraph Legend [Legend]
+        direction LR
+        L1["NEW (Task-7 UC-03-admin-overview)"]:::new
+        L2["REUSED (Task-1..6)"]:::reused
+        L3["DB table or SQL migration"]:::db
+        L4["Wire contract"]:::contract
+        L5["NOT BUILT (D-2 deferred)"]:::nocode
+    end
+
+    %% FR/AC anchor notes:
+    %%   FR-1  V7 migration           -> Mig + TblU
+    %%   FR-2  User.Role extension    -> EntU
+    %%   FR-3  AdminAuthorizer        -> Auth
+    %%   FR-4  /overview              -> Ctrl overview handler
+    %%   FR-5..FR-8 per-tile          -> Ctrl users/rooms/wishlist/sales handlers
+    %%   FR-9  AdminOverviewRepository-> Repo
+    %%   FR-10 Service + clock        -> Svc + Clk + WR
+    %%   FR-11 Error envelope/advice  -> Advice + Err + Err2
+    %%   FR-12 OpenAPI contract       -> Contract
+    %%   FR-13 No cross-task regress  -> MigPrev + reused beans + EntU additive only
+    %%   FR-14 Config keys            -> Cfg
+    %%   FR-15 No admin client        -> NoRN + NoWeb (NOT BUILT)

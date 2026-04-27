@@ -1,0 +1,210 @@
+%% AuthenticSelf - UC-03-admin-overview: PRD section 8 sequence diagrams
+%% Four flows on one canvas, separated by rect/Note blocks:
+%%   (A) Happy path GET /api/v1/admin/overview                          (FR-3..FR-10 / AC-7 / AC-8 / AC-9 / AC-32 / AC-33 / AC-53)
+%%   (B) Error    - missing X-User-Id                                   (FR-3 / FR-11 / AC-27)
+%%   (C) Error    - unknown user id                                     (FR-3 / FR-11 / AC-27)
+%%   (D) Error    - non-admin role / bad window value                   (FR-3 / FR-11 / AC-11 / AC-26)
+%%
+%% Source of truth (no RN admin client exists per D-2 / FR-15 / AC-43 / AC-52):
+%%   src/backend/src/main/java/com/authenticself/admin/AdminController.java
+%%   src/backend/src/main/java/com/authenticself/admin/AdminAuthorizer.java
+%%   src/backend/src/main/java/com/authenticself/admin/TimeWindow.java
+%%   src/backend/src/main/java/com/authenticself/admin/WindowResolver.java
+%%   src/backend/src/main/java/com/authenticself/admin/AdminOverviewService.java
+%%   src/backend/src/main/java/com/authenticself/admin/AdminOverviewRepository.java
+%%   src/backend/src/main/java/com/authenticself/admin/AdminExceptionAdvice.java
+%%   src/backend/src/main/java/com/authenticself/admin/AdminErrorCode.java
+%%   src/backend/src/main/resources/db/migration/V7__add_users_role.sql
+%%
+%% PRD refs:
+%%   section 2 overview            (admin dashboard)
+%%   section 6 UC-03 basic flow    (four tiles + window filter)
+%%   section 8 sequence template   (user -> backend -> MySQL)
+%%   section 9 system architecture (Spring API layer only; no Python AI)
+
+sequenceDiagram
+    autonumber
+    actor Ops as HTTP client<br/>(curl / Postman)<br/>D-2: no RN / admin SPA in this iteration
+    participant Ctrl as AdminController<br/>@RequestMapping /api/v1/admin<br/>FR-4..FR-8 / AC-8 / AC-9
+    participant Auth as AdminAuthorizer<br/>@Component requireAdmin<br/>FR-3 / AC-7 / AC-26 / AC-27
+    participant URepo as UserRepository<br/>(reused Task-1)<br/>FR-3
+    participant TW as TimeWindow.parse<br/>enum { LAST_7D, LAST_30D, ALL }<br/>FR-4 / AC-10 / AC-11
+    participant WR as WindowResolver<br/>@Component + Clock(+09:00)<br/>FR-10 / AC-32
+    participant Svc as AdminOverviewService<br/>@Service (no @Transactional)<br/>FR-10 / AC-32 / AC-51
+    participant Repo as AdminOverviewRepository<br/>JpaRepository + 14 @Query<br/>FR-9 / AC-30 / AC-31
+    participant DB as MySQL 8<br/>users / spaces / wishlist / furniture<br/>post-V7 (idx_users_role)
+    participant Adv as AdminExceptionAdvice<br/>@RestControllerAdvice basePackages=admin<br/>@Order(HIGHEST_PRECEDENCE)<br/>FR-11 / AC-29
+
+    Note over Ops,DB: Precondition - V1..V7 applied. Bootstrap admin seeded manually via<br/>  UPDATE users SET role='ADMIN' WHERE email='<ops>'; (D-1, per V7 header comment).
+
+    %% ==========================================================
+    %% (A) Happy path - master overview aggregate
+    %% ==========================================================
+    rect rgba(204,229,255,0.30)
+    Note over Ops,DB: (A) Happy path GET /api/v1/admin/overview?window=LAST_30D - FR-3..FR-10 / AC-7 / AC-8 / AC-9 / AC-32 / AC-33 / AC-53
+    Ops->>Ctrl: GET /api/v1/admin/overview?window=LAST_30D<br/>header X-User-Id=u_admin
+
+    %% --- stage 1..3: AdminAuthorizer.requireAdmin three-stage check ---
+    Ctrl->>Auth: requireAdmin(userId="u_admin")  [first statement, AC-8]
+    Auth->>Auth: check 1 - userIdHeader null/blank?<br/>(branch 1 fires here - skipped on happy path)
+    Auth->>URepo: findById("u_admin")
+    URepo->>DB: SELECT user_id,name,email,role,... FROM users WHERE user_id='u_admin'
+    DB-->>URepo: 1 row (User entity)
+    URepo-->>Auth: Optional.of(user)
+    Auth->>Auth: check 2 - user present (passes)<br/>check 3 - user.role == Role.ADMIN (passes)
+    Auth-->>Ctrl: (void) OK
+
+    %% --- Window parsing (after authorization so a bad window never leaks admin existence) ---
+    Ctrl->>TW: parse("LAST_30D")
+    TW-->>Ctrl: TimeWindow.LAST_30D
+
+    %% --- Service orchestration ---
+    Ctrl->>Svc: overview(userId, LAST_30D)
+    Svc->>WR: resolve(LAST_30D)
+    WR->>WR: now(clock, Asia/Seoul) .toLocalDate()<br/>.minusDays(30) .atStartOfDay(KST) .toInstant()
+    WR-->>Svc: ws = 2026-03-19T00:00:00+09:00 (AC-32)
+
+    par Users tile (AC-12..AC-15)
+      Svc->>Repo: countUsersInRoleAndWindow('USER',  ws)
+      Repo->>DB: SELECT COUNT(*) FROM users WHERE role='USER' AND (ws IS NULL OR created_at >= ws)
+      DB-->>Repo: n_users
+      Svc->>Repo: countUsersInRoleAndWindow('ADMIN', ws)
+      Repo->>DB: SELECT COUNT(*) FROM users WHERE role='ADMIN' AND (ws IS NULL OR created_at >= ws)
+      DB-->>Repo: n_admins
+      Svc->>Repo: countNewSignups(ws)
+      Repo->>DB: SELECT COUNT(*) FROM users WHERE (ws IS NULL OR created_at >= ws)
+      DB-->>Repo: n_signups
+      Svc->>Repo: countActiveUsers(ws)
+      Repo->>DB: SELECT COUNT(DISTINCT user_id) FROM spaces WHERE (ws IS NULL OR uploaded_at >= ws)
+      DB-->>Repo: n_active
+      Svc->>Repo: groupSignupsByDayRaw(ws, '+09:00')
+      Repo->>DB: SELECT DATE(CONVERT_TZ(created_at,'+00:00','+09:00')) day, COUNT(*) FROM users GROUP BY day ORDER BY day ASC
+      DB-->>Repo: rows[day, cnt]
+      Svc->>Repo: minUserCreatedAt()  (fallback for window=ALL densification)
+      Repo->>DB: SELECT MIN(created_at) FROM users
+      DB-->>Repo: earliest_instant
+    and Rooms tile (AC-16..AC-19 / AC-34 / AC-35)
+      Svc->>Repo: countSpaces(ws)
+      Repo->>DB: SELECT COUNT(*) FROM spaces WHERE (ws IS NULL OR uploaded_at >= ws)
+      DB-->>Repo: n_spaces
+      Svc->>Repo: countSpacesByStatusRaw(ws)
+      Repo->>DB: SELECT status, COUNT(*) FROM spaces GROUP BY status
+      DB-->>Repo: rows[Space.Status, cnt]
+      Svc->>Repo: countSpacesByStyleRaw(ws)
+      Repo->>DB: SELECT style, COUNT(*) FROM spaces WHERE style IS NOT NULL GROUP BY style
+      DB-->>Repo: rows[Style, cnt]  (NULL-style rows NOT bucketed, AC-35)
+      Svc->>Repo: topMainColorsRaw(ws, lim=5)
+      Repo->>DB: SELECT main_color, COUNT(*) FROM spaces WHERE main_color IS NOT NULL GROUP BY main_color ORDER BY cnt DESC, color ASC LIMIT 5
+      DB-->>Repo: rows[#hex, cnt]  (tie-break color ASC, AC-50)
+    and Wishlist tile (AC-20 / AC-21)
+      Svc->>Repo: countWishlist(ws)
+      Repo->>DB: SELECT COUNT(*) FROM wishlist WHERE (ws IS NULL OR added_at >= ws)
+      DB-->>Repo: n_items
+      Svc->>Repo: countWishlistByStatusRaw(ws)
+      Repo->>DB: SELECT status, COUNT(*) FROM wishlist GROUP BY status<br/>(DB casing Active / Purchased - service translates to ACTIVE / PURCHASED)
+      DB-->>Repo: rows[status, cnt]
+      Svc->>Repo: countWishlistByCategoryRaw(ws)
+      Repo->>DB: SELECT category, COUNT(*) FROM wishlist GROUP BY category
+      DB-->>Repo: rows[category, cnt]
+    and Sales tile (AC-22..AC-25)
+      Svc->>Repo: sumSalesKrw(ws)
+      Repo->>DB: SELECT COALESCE(SUM(price),0) FROM wishlist<br/>WHERE status='Purchased' AND purchased_at IS NOT NULL AND (ws IS NULL OR purchased_at >= ws)
+      DB-->>Repo: total_krw (snapshot price - AC-23)
+      Svc->>Repo: countPurchasedItems(ws)
+      Repo->>DB: SELECT COUNT(*) FROM wishlist WHERE status='Purchased' AND purchased_at IS NOT NULL
+      DB-->>Repo: n_purchased
+      Svc->>Repo: sumSalesByCategoryRaw(ws)
+      Repo->>DB: SELECT category, COALESCE(SUM(price),0) FROM wishlist WHERE status='Purchased' GROUP BY category
+      DB-->>Repo: rows[category, krw]
+      Svc->>Repo: sumSalesByDayRaw(ws, '+09:00')
+      Repo->>DB: SELECT DATE(CONVERT_TZ(purchased_at,'+00:00','+09:00')) day, COALESCE(SUM(price),0) FROM wishlist ... GROUP BY day ORDER BY day ASC
+      DB-->>Repo: rows[day, krw]
+      Svc->>Repo: minPurchasedAt()  (fallback for window=ALL)
+      Repo->>DB: SELECT MIN(purchased_at) FROM wishlist WHERE status='Purchased'
+      DB-->>Repo: earliest_instant
+    end
+
+    Svc->>Svc: pivot enum-keyed maps (EnumMap, zero-fill every Space.Status / Style / category)<br/>translate DB 'Active'/'Purchased' to REST 'ACTIVE'/'PURCHASED'<br/>densify signupsByDay + salesByDay (zero-fill missing calendar days, AC-15 / AC-25)<br/>conversionRate = round(PURCHASED/total, 2), guarded to 0.0 when total==0 (AC-21)<br/>averageOrderKrw = count==0 ? 0 : Math.round((double)total/count)
+    Svc->>Svc: log.info("op=overview window=LAST_30D userId=u_admin durationMs=N") (AC-51)<br/>no PII beyond opaque userId (AC-41)
+    Svc-->>Ctrl: AdminOverviewResponse(window, generatedAt, users, rooms, wishlist, sales)
+    Ctrl-->>Ops: 200 { window:"LAST_30D", generatedAt:"2026-04-18T09:14:22+09:00",<br/>  users:{...}, rooms:{...}, wishlist:{...}, sales:{...} }
+    end
+
+    Note over Ops,DB: Per-tile endpoints /admin/{users,rooms,wishlist,sales} reuse exactly the<br/>same service-layer DTOs (UsersTile / RoomsTile / WishlistTile / SalesTile)<br/>- AC-33 byte-identical invariant holds by construction.
+
+    %% ==========================================================
+    %% (B) Error - missing X-User-Id header  (branch 1 of AdminAuthorizer)
+    %% ==========================================================
+    rect rgba(248,215,218,0.30)
+    Note over Ops,Adv: (B) MISSING_USER_HEADER 400 - FR-3 / FR-11 / AC-27
+    Ops->>Ctrl: GET /api/v1/admin/overview?window=ALL<br/>(no X-User-Id header)
+    Ctrl->>Auth: requireAdmin(userId=null)
+    Auth->>Auth: branch 1: userIdHeader == null || isBlank
+    Auth--xCtrl: throw AdminException(MISSING_USER_HEADER)
+    Ctrl--xAdv: exception propagates
+    Adv->>Adv: handleAdmin() - corr = UUID.randomUUID()<br/>log.warn("admin 4xx code=MISSING_USER_HEADER correlationId={}", corr)
+    Adv-->>Ops: 400 { errorCode:"MISSING_USER_HEADER",<br/>         message:"사용자 인증 정보가 없습니다.",<br/>         correlationId:"b1e..." }
+    Note over Auth,Adv: DB never touched - userRepository.findById is NOT called in this branch.<br/>AdminAuthorizerTest#nullHeader_ac7 pins this with verify(repo, never()).findById(any()).
+    end
+
+    %% ==========================================================
+    %% (C) Error - unknown user  (branch 2 of AdminAuthorizer)
+    %% ==========================================================
+    rect rgba(255,243,205,0.35)
+    Note over Ops,Adv: (C) USER_NOT_FOUND 404 - FR-3 / FR-11 / AC-27
+    Ops->>Ctrl: GET /api/v1/admin/overview<br/>X-User-Id=u_ghost
+    Ctrl->>Auth: requireAdmin("u_ghost")
+    Auth->>Auth: branch 1 passes (header present)
+    Auth->>URepo: findById("u_ghost")
+    URepo->>DB: SELECT ... FROM users WHERE user_id='u_ghost'
+    DB-->>URepo: (no row)
+    URepo-->>Auth: Optional.empty()
+    Auth->>Auth: branch 2: user.isEmpty()
+    Auth--xCtrl: throw AdminException(USER_NOT_FOUND)
+    Ctrl--xAdv: exception propagates
+    Adv-->>Ops: 404 { errorCode:"USER_NOT_FOUND",<br/>         message:"사용자를 찾을 수 없습니다.",<br/>         correlationId:"..." }
+    Note over Auth,Adv: Branch 3 (role check) is NEVER reached - AdminAuthorizer returns early.<br/>Ordering guarantee verified by AdminAuthorizerTest#unknownUser_ac7.
+    end
+
+    %% ==========================================================
+    %% (D) Error - non-admin role (branch 3) and invalid window
+    %% ==========================================================
+    rect rgba(226,230,234,0.35)
+    Note over Ops,Adv: (D.1) NOT_ADMIN 403 - FR-3 / FR-11 / AC-26
+    Ops->>Ctrl: GET /api/v1/admin/sales<br/>X-User-Id=u_normal  (role=USER)
+    Ctrl->>Auth: requireAdmin("u_normal")
+    Auth->>URepo: findById("u_normal")
+    URepo->>DB: SELECT ... FROM users WHERE user_id='u_normal'
+    DB-->>URepo: row { role='USER' }
+    URepo-->>Auth: Optional.of(user)
+    Auth->>Auth: branch 3: user.getRole() != Role.ADMIN
+    Auth--xCtrl: throw AdminException(NOT_ADMIN)
+    Ctrl--xAdv: exception propagates
+    Adv-->>Ops: 403 { errorCode:"NOT_ADMIN",<br/>         message:"관리자 권한이 필요합니다.",<br/>         correlationId:"..." }
+
+    Note over Ops,Adv: (D.2) INVALID_TIME_WINDOW 400 - FR-4 / FR-11 / AC-11
+    Ops->>Ctrl: GET /api/v1/admin/overview?window=YESTERDAY<br/>X-User-Id=u_admin
+    Ctrl->>Auth: requireAdmin("u_admin")  (passes)
+    Auth-->>Ctrl: (void)
+    Ctrl->>TW: parse("YESTERDAY")
+    TW->>TW: normalized="YESTERDAY" - not in enum values
+    TW--xCtrl: throw AdminException(INVALID_TIME_WINDOW)
+    Ctrl--xAdv: exception propagates
+    Adv-->>Ops: 400 { errorCode:"INVALID_TIME_WINDOW",<br/>         message:"기간 필터 값이 올바르지 않습니다. (LAST_7D, LAST_30D, ALL)",<br/>         correlationId:"..." }
+    Note over TW,Adv: window parsing happens AFTER requireAdmin so a non-admin caller<br/>with a bad window value still gets 403 NOT_ADMIN (role check runs first).
+    end
+
+    %% ---------------------------------------------------------------
+    %% Legend (FR / AC traceability)
+    %% ---------------------------------------------------------------
+    %% AdminAuthorizer three-stage throw order ........... FR-3  / AC-7
+    %% requireAdmin first-statement-per-handler .......... FR-3  / AC-8
+    %% GET /overview master aggregate .................... FR-4  / AC-9 / AC-33
+    %% Users/Rooms/Wishlist/Sales tiles .................. FR-5..FR-8 / AC-12..AC-25
+    %% Repository 14 @Query methods ...................... FR-9  / AC-30 / AC-31
+    %% Fixed-clock window math ........................... FR-10 / AC-32
+    %% AdminExceptionAdvice error envelope ............... FR-11 / AC-29 / AC-47
+    %% generatedAt ISO-8601 +09:00 + window echo ......... FR-10 / AC-53
+    %% No PII in logs .................................... NFR   / AC-41 / AC-51
+    %% MISSING_USER_HEADER / USER_NOT_FOUND / NOT_ADMIN /
+    %%   INVALID_TIME_WINDOW ............................. FR-11 / AC-11 / AC-26 / AC-27

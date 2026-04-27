@@ -1,0 +1,151 @@
+%% AuthenticSelf - UC-01-photo-upload: Updated system architecture
+%% Baseline: artifacts/DB-schema-init/viz/architecture.mmd (Task 1)
+%% Updates in this task:
+%%   - Client Layer RN app ACTIVE (Home/Upload/Analyzing screens)
+%%   - Backend: API Gateway + PhotoUploadController + PhotoUploadService ACTIVE
+%%   - Data Layer: V2 migration applied on spaces; Object Storage (Local FS) ACTIVE
+%%   - AI Service Layer: still PENDING (Tasks 3-5)
+%%   - Other controllers (UserService / wishlist / admin) still PENDING
+%%
+%% Source of truth for the new active portions:
+%%   src/backend/src/main/java/com/authenticself/controller/PhotoUploadController.java
+%%   src/backend/src/main/java/com/authenticself/service/PhotoUploadService.java
+%%   src/backend/src/main/java/com/authenticself/storage/local/LocalFileSystemObjectStorageService.java
+%%   src/backend/src/main/resources/db/migration/V2__add_spaces_status_and_photo.sql
+%%   src/mobile/src/screens/{Home,Upload,Analyzing}Screen.tsx
+%%   src/mobile/src/api/{client.ts,errorMessages.ts}
+
+flowchart LR
+    %% =========================================================
+    %% Client Layer - ACTIVE for RN upload flow
+    %% =========================================================
+    subgraph Client["Client Layer - ACTIVE (RN upload path)"]
+        direction TB
+        RN_Home["HomeScreen (RN)<br/>CTA: 방 사진 하나로 가구 추천<br/>FR-7 / AC-17"]:::active
+        RN_Upload["UploadScreen (RN)<br/>picker + preview + progress<br/>FR-7 / AC-18"]:::active
+        RN_Analyzing["AnalyzingScreen (stub)<br/>waits for UC-01-space-analysis<br/>FR-7"]:::scaffold
+        RN_Api["api/client.ts (XHR)<br/>+ errorMessages.ts<br/>FR-7 / AC-19"]:::active
+        FE_Admin["Admin Dashboard<br/>(UC-03-admin-overview)"]:::pending
+        FE_Unity["Unity AR Placement<br/>(AR-furniture-placement)"]:::pending
+    end
+
+    %% =========================================================
+    %% Backend Layer - partial (photo-upload slice ACTIVE)
+    %% =========================================================
+    subgraph Backend["Backend Layer - partial"]
+        direction TB
+        App["AuthenticSelfApplication<br/>@SpringBootApplication"]:::active
+        FW["Flyway migrator<br/>V1 + V2"]:::active
+        HB["Hibernate (ddl-auto=validate)"]:::active
+
+        APIGW["API Gateway / Dispatcher<br/>Spring MVC + multipart"]:::active
+        CTRL_PHOTO["PhotoUploadController<br/>POST /api/v1/spaces/photo<br/>FR-1, FR-9"]:::active
+        ADV["UploadExceptionAdvice<br/>@RestControllerAdvice<br/>FR-6"]:::active
+        SVC_PHOTO["PhotoUploadService<br/>validate -> store -> persist<br/>FR-2, FR-4, FR-5, FR-9"]:::active
+        STORE_IF["ObjectStorageService (interface)<br/>FR-3 / AC-15"]:::active
+        STORE_IMPL["LocalFileSystemObjectStorageService<br/>FR-3 / AC-16"]:::active
+
+        REPO_S["SpaceRepository<br/>JpaRepository&lt;Space&gt;<br/>FR-4"]:::active
+        REPO_U["UserRepository<br/>JpaRepository&lt;User&gt;<br/>AC-9 existence check"]:::active
+
+        CTRL_USER["UserService / Auth<br/>(real auth - future)"]:::pending
+        CTRL_WL["Wishlist API<br/>(UC-02-wishlist)"]:::pending
+        CTRL_ADMIN["Admin API<br/>(UC-03-admin-overview)"]:::pending
+        AIORCH["AI Orchestrator<br/>(UC-01-space-analysis)"]:::pending
+    end
+
+    %% =========================================================
+    %% Data Layer - ACTIVE (V2 applied) + Object Storage ACTIVE
+    %% =========================================================
+    subgraph Data["Data Layer - ACTIVE (V2 applied)"]
+        direction TB
+        MY[("MySQL 8<br/>schema=authenticself")]:::active
+        T_U[("users<br/>V1")]:::active
+        T_S[("spaces<br/>V1 + V2 delta<br/>FR-0 / AC-3/AC-4/AC-5")]:::active
+        T_F[("furniture<br/>V1")]:::active
+        T_W[("wishlist<br/>V1")]:::active
+        HIST[("flyway_schema_history<br/>v1, v2 success=1<br/>AC-2")]:::active
+        OBJ["Object Storage<br/>Local FS (./var/object-storage)<br/>keys: spaces/{yyyy}/{MM}/{dd}/{roomId}.{ext}<br/>FR-3 / AC-16"]:::active
+    end
+
+    %% =========================================================
+    %% AI Service Layer - PENDING
+    %% =========================================================
+    subgraph AI["AI Service Layer - pending (future tasks)"]
+        direction TB
+        SA["Space Analyzer<br/>(UC-01-space-analysis, Task 3)<br/>reads WHERE status='PENDING_ANALYSIS'"]:::pending
+        SR["Style Recogniser<br/>(UC-01-style-selection, Task 4)"]:::pending
+        RE["Recommendation Engine<br/>(UC-01-recommendation, Task 5)"]:::pending
+    end
+
+    %% --- Active wiring (implemented in this task) ---
+    RN_Home --> RN_Upload
+    RN_Upload --> RN_Api
+    RN_Upload --> RN_Analyzing
+    RN_Api -->|POST /api/v1/spaces/photo<br/>X-User-Id| APIGW
+    APIGW --> CTRL_PHOTO
+    CTRL_PHOTO --> SVC_PHOTO
+    CTRL_PHOTO --> ADV
+    SVC_PHOTO --> STORE_IF
+    STORE_IF -.implements.-> STORE_IMPL
+    SVC_PHOTO --> REPO_S
+    SVC_PHOTO --> REPO_U
+    REPO_S --> MY
+    REPO_U --> MY
+    STORE_IMPL --> OBJ
+    App --> FW
+    App --> HB
+    FW -->|V1 + V2| MY
+    FW -->|writes| HIST
+    MY --- T_U
+    MY --- T_S
+    MY --- T_F
+    MY --- T_W
+    MY --- HIST
+
+    %% --- Pending wiring (future tasks, dashed) ---
+    FE_Admin -.-> APIGW
+    FE_Unity -.-> APIGW
+    APIGW -.-> CTRL_USER
+    APIGW -.-> CTRL_WL
+    APIGW -.-> CTRL_ADMIN
+    AIORCH -.reads PENDING_ANALYSIS.-> MY
+    AIORCH -.-> SA
+    AIORCH -.-> SR
+    AIORCH -.-> RE
+    SA -.writes dimensions/style/analysis_date.-> MY
+
+    classDef active   fill:#d4edda,stroke:#28a745,color:#155724,stroke-width:2px;
+    classDef scaffold fill:#fff3cd,stroke:#d39e00,color:#856404,stroke-width:2px;
+    classDef pending  fill:#f1f1f1,stroke:#999,color:#777,stroke-dasharray:4 3;
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% GREEN (active) - delivered by this task (UC-01-photo-upload):
+%%   Client: HomeScreen, UploadScreen, api/client.ts, api/errorMessages.ts
+%%           ... FR-7, AC-17, AC-18, AC-19
+%%   Backend: API Gateway/Dispatcher, PhotoUploadController,
+%%            UploadExceptionAdvice, PhotoUploadService,
+%%            ObjectStorageService (iface) + LocalFileSystem impl,
+%%            SpaceRepository, UserRepository
+%%            ... FR-1..FR-6, FR-8, FR-9, AC-6..AC-16, AC-20, AC-21
+%%   Data:    V2 migration applied (spaces gains photo_url, content_type,
+%%            file_size_bytes, status, uploaded_at, original_filename),
+%%            idx_spaces_status, Object Storage (Local FS)
+%%            ... FR-0, AC-1..AC-5, AC-22
+%%
+%% YELLOW (scaffold) - scaffolded here, finished later:
+%%   AnalyzingScreen ............. FR-7 (full behavior in Task 3)
+%%
+%% GREY (pending) - future tasks:
+%%   UserService / real auth ..... post-UC-01 auth task
+%%   AI Orchestrator + Space
+%%     Analyzer + Style Recogniser
+%%     + Recommendation Engine ... UC-01-space-analysis / style-selection / recommendation
+%%   Wishlist API / Admin API .... UC-02 / UC-03
+%%   Unity AR .................... AR-furniture-placement
+%%
+%% This file supersedes artifacts/DB-schema-init/viz/architecture.mmd as the
+%% current live architecture snapshot. Next update: Task 3 flips AI
+%% Space Analyzer + AnalyzingScreen real polling to ACTIVE.

@@ -1,0 +1,119 @@
+%% AuthenticSelf - UC-01-style-selection: CompletableFuture.allOf parallel mechanics
+%%
+%% Zoomed-in view of the ONE thing that closes PRD section 8 "par [AI 병렬 처리]":
+%% AIOrchestrator.analyze fires TWO supplyAsync calls onto aiExecutor BEFORE any
+%% .join() / .get(), joins via allOf(..).join(), then inspects each future
+%% independently to cover the four-way partial-success matrix.
+%%
+%% Source of truth:
+%%   src/backend/src/main/java/com/authenticself/ai/AIOrchestrator.java  (lines ~80-170)
+%%   src/backend/src/main/java/com/authenticself/ai/AiExecutorConfig.java
+%%   src/backend/src/main/java/com/authenticself/ai/SpaceAnalysisClient.java
+%%   src/backend/src/main/java/com/authenticself/ai/StyleAnalysisClient.java
+%%
+%% FR refs: FR-11 (parallel fan-out) / FR-12 (partial-success) / FR-17 (timing logs).
+%% AC refs: AC-12 (source contains supplyAsync + allOf) / AC-13 (wall-clock max).
+
+flowchart TB
+
+    %% ======================================================
+    %% Caller + executor setup
+    %% ======================================================
+    CALLER["AIOrchestrator.analyze(roomId)<br/>after Snapshot shows PENDING_ANALYSIS"]
+    EXEC["aiExecutor<br/>(Spring ThreadPoolTaskExecutor)<br/>core=2 / max=8 / queue=64<br/>prefix ai-orchestrator-<br/>AiExecutorConfig - FR-11"]
+
+    CALLER -->|"1 - submit<br/>CompletableFuture.supplyAsync(<br/>  () -> spaceClient.callSpaceAnalysis(...),<br/>  aiExecutor)"| SF_SUBMIT
+    CALLER -->|"2 - submit<br/>CompletableFuture.supplyAsync(<br/>  () -> styleClient.callStyleAnalysis(...),<br/>  aiExecutor)"| ST_SUBMIT
+
+    SF_SUBMIT{{"spaceFuture : CompletableFuture&lt;SpaceAnalysisResponse&gt;<br/>queued on aiExecutor"}}:::futureBox
+    ST_SUBMIT{{"styleFuture : CompletableFuture&lt;StyleAnalysisResponse&gt;<br/>queued on aiExecutor"}}:::futureBox
+
+    SF_SUBMIT --> SF_RUN
+    ST_SUBMIT --> ST_RUN
+
+    SF_RUN["ai-orchestrator-1 thread<br/>invokes SpaceAnalysisClient<br/>→ HTTP POST /analyze/space<br/>(timeout connect 2s, read 10s)"]:::workerBox
+    ST_RUN["ai-orchestrator-2 thread<br/>invokes StyleAnalysisClient<br/>→ HTTP POST /analyze/style<br/>(timeout connect 2s, read 10s)"]:::workerBox
+
+    SF_RUN --> SF_DONE
+    ST_RUN --> ST_DONE
+
+    SF_DONE{{"spaceFuture completes<br/>success: SpaceAnalysisResponse<br/>or completes exceptionally:<br/>&nbsp;&nbsp;AIException(ANALYSIS_IMAGE_* / ANALYSIS_FAILED / AI_SERVICE_UNAVAILABLE)<br/>wrapped in CompletionException"}}:::futureBox
+    ST_DONE{{"styleFuture completes<br/>success: StyleAnalysisResponse<br/>or completes exceptionally:<br/>&nbsp;&nbsp;AIException(ANALYSIS_IMAGE_* / ANALYSIS_FAILED / AI_SERVICE_UNAVAILABLE)<br/>wrapped in CompletionException"}}:::futureBox
+
+    %% ======================================================
+    %% Join
+    %% ======================================================
+    SF_DONE --> JOIN
+    ST_DONE --> JOIN
+
+    JOIN["3 - CompletableFuture.allOf(spaceFuture, styleFuture).join()<br/>wall-clock = max(t_space, t_style) + overhead<br/>AC-13: &lt; 3000 ms with both stubs at 2000 ms<br/><br/>try { allOf.join(); } catch (CompletionException ignored) { }<br/>(swallow — inspect per-future next)"]:::joinBox
+
+    %% ======================================================
+    %% Unwrapping
+    %% ======================================================
+    JOIN --> UNWRAP["4 - unwrap(CompletionException ce)<br/>while cause instanceof CompletionException ce && ce.getCause() != null:<br/>&nbsp;&nbsp;cause = ce.getCause();<br/>if cause instanceof ExecutionException ee && ee.getCause() != null:<br/>&nbsp;&nbsp;cause = ee.getCause();<br/>return (cause instanceof AIException) ? (AIException) cause<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: new AIException(AI_SERVICE_UNAVAILABLE, ...)"]:::decisionBox
+
+    UNWRAP --> INSPECT_SP
+
+    %% ======================================================
+    %% Per-future outcome inspection
+    %% ======================================================
+    INSPECT_SP{"5 - spaceFuture.get()<br/>throws?"}:::decisionBox
+
+    INSPECT_SP -- "no (success)" --> INSPECT_ST
+    INSPECT_SP -- "yes + ae.isTransport()==true<br/>(connect/read timeout, ConnectException, 5xx)" --> OUT_TRANSPORT
+    INSPECT_SP -- "yes + analyzer error<br/>(422 IMAGE_NOT_FOUND/READ/ANALYSIS_FAILED)" --> OUT_ANALYZER
+
+    INSPECT_ST{"6 - styleFuture.isCompletedExceptionally()?<br/>(checked BEFORE .get() so we don't double-throw)"}:::decisionBox
+
+    INSPECT_ST -- "no (success)" --> OUT_BOTH
+    INSPECT_ST -- "yes (any cause)" --> OUT_DEGRADED
+
+    %% ======================================================
+    %% Outcomes (the partial-success decision matrix)
+    %% ======================================================
+    OUT_BOTH["OUTCOME A: both succeed (AC-14)<br/>persistence.markAnalyzed(roomId, dims, mainColor, style)<br/>StyleConfidenceCache.put(roomId, confidence)<br/>log INFO ai.analyze ok spaceMs=.. styleMs=.. totalMs=..<br/>return SpaceAnalysisResultDTO.ofAnalyzed(...)"]:::outcomeBoth
+
+    OUT_DEGRADED["OUTCOME B: space OK, style failed (AC-15)<br/>persistence.markAnalyzed(roomId, dims, mainColor, null)<br/>log WARN ai.analyze style failed (degraded-success) code=...<br/>return SpaceAnalysisResultDTO.ofAnalyzed(...)  HTTP 200<br/>style-only transport errors DO NOT block the user flow"]:::outcomeDegraded
+
+    OUT_ANALYZER["OUTCOME C: space analyzer error (AC-16)<br/>style outcome DISCARDED even if successful<br/>persistence.markFailed(roomId)<br/>log WARN ai.analyze space analyzer failure code=...<br/>throw AIException (422)<br/>controller returns ANALYSIS_IMAGE_READ_FAILED / ... with correlationId"]:::outcomeFailed
+
+    OUT_TRANSPORT["OUTCOME D: space transport error (AC-17)<br/>NO DB write - row stays PENDING_ANALYSIS<br/>style outcome discarded<br/>log ERROR ai.analyze space transport failure code=AI_SERVICE_UNAVAILABLE<br/>throw AIException (502)<br/>AnalysisPoller will retry on next @Scheduled tick"]:::outcomeTransport
+
+    classDef futureBox    fill:#fff3cd,stroke:#d39e00,color:#856404;
+    classDef workerBox    fill:#cfe2ff,stroke:#0d6efd,color:#052c65;
+    classDef joinBox      fill:#e2d4f5,stroke:#7a3ec5,color:#3d1b64;
+    classDef decisionBox  fill:#fde2e4,stroke:#c5383e,color:#5c1114;
+    classDef outcomeBoth      fill:#d4edda,stroke:#28a745,color:#155724,stroke-width:2px;
+    classDef outcomeDegraded  fill:#fff3cd,stroke:#d39e00,color:#856404,stroke-width:2px;
+    classDef outcomeFailed    fill:#f8d7da,stroke:#c24b4b,color:#721c24,stroke-width:2px;
+    classDef outcomeTransport fill:#e2e3e5,stroke:#6c757d,color:#383d41,stroke-width:2px;
+
+%% ---------------------------------------------------------------
+%% Partial-success decision matrix (redundant cross-reference)
+%% ---------------------------------------------------------------
+%%
+%%   | spaceFuture | styleFuture       | spaces.status | spaces.style | throws?                 | AC    |
+%%   |-------------|-------------------|---------------|--------------|-------------------------|-------|
+%%   | success     | success           | ANALYZED      | "<STYLE>"    | no                      | AC-14 |
+%%   | success     | ANY failure       | ANALYZED      | NULL         | no (WARN log)           | AC-15 |
+%%   | analyzer 422| ANY               | FAILED        | NULL         | yes -> 422              | AC-16 |
+%%   | transport   | ANY               | PENDING (UNCHG)| NULL         | yes -> 502              | AC-17 |
+%%
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% aiExecutor bean ................. FR-11 / AiExecutorConfig
+%% supplyAsync x 2 BEFORE any join . FR-11 / AC-12
+%% allOf().join() wall-clock ....... FR-11 / AC-13 (< 3000 ms vs sequential >= 4000 ms)
+%% CompletionException unwrapping .. FR-12 (unwrap / unwrapOrNull helpers)
+%% Outcome A (both OK) ............. FR-12 / AC-14
+%% Outcome B (style-only failure) .. FR-12 / AC-15 (degraded success, HTTP 200)
+%% Outcome C (space analyzer) ...... FR-12 / AC-16 (FAILED, style discarded)
+%% Outcome D (space transport) ..... FR-12 / AC-17 (PENDING unchanged, 502)
+%% Timing log (INFO one-liner) ..... FR-17 (spaceMs / styleMs / totalMs)
+%%
+%% NOT shown here (rendered in sequence.mmd):
+%%   - the Python-side asyncio.to_thread on /analyze/style (FR-6)
+%%   - the pre-fan-out loadForAnalysis snapshot
+%%   - the RN polling loop and preferred-style PUT

@@ -1,0 +1,377 @@
+{
+  "taskId": "UC-01-recommendation",
+  "specPath": "artifacts/UC-01-recommendation/spec.md",
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "given": "the Python service started via uvicorn",
+      "when": "GET /openapi.json is fetched",
+      "then": "paths contains /analyze/space, /analyze/style, AND /recommend/furniture (all three)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-2",
+      "given": "a valid request body with a 24-item catalog and a room of widthM=4, lengthM=4, heightM=2.4, preferredStyle='MODERN', detectedStyle='MODERN', detectedObjects=[]",
+      "when": "POST /recommend/furniture is called",
+      "then": "response is HTTP 200; body has status=='OK', resolvedStyle=='MODERN', recommendations has exactly four keys {desk,bed,chair,lighting}, each array length <= 3, every item has nine required fields plus four sub-score keys under scoreBreakdown, processingMs > 0",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-3",
+      "given": "an identical request body",
+      "when": "POST /recommend/furniture is called three times",
+      "then": "every non-processingMs field of the response is byte-identical across all three responses including ordering within each category and 2-dp fitScore values",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-4",
+      "given": "a catalog with ZERO items of type 'bed'",
+      "when": "POST /recommend/furniture is called",
+      "then": "recommendations.bed is [] (present, empty) AND the other three category keys are still present AND no additional keys appear under recommendations",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-5",
+      "given": "a catalog containing a desk of widthCm=500, lengthCm=200, heightCm=100 and a room of widthM=3, lengthM=3, heightM=2.4",
+      "when": "POST /recommend/furniture is called",
+      "then": "that desk does NOT appear in recommendations.desk (hard-fit failure: max(500,200)=500 > 300-30=270)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-6",
+      "given": "a desk consuming 15% of floor footprint (then 25%, then 45%)",
+      "when": "scored by /recommend/furniture",
+      "then": "scoreBreakdown.sizeFit == 1.0 at 15%; 0.7 at 25%; 0.4 at 45%",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-7",
+      "given": "resolvedStyle='MODERN' and a desk with styleTags=['MODERN','SCANDINAVIAN']",
+      "when": "scored",
+      "then": "scoreBreakdown.styleMatch == 1.00",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-8",
+      "given": "resolvedStyle='MODERN' and a desk with styleTags=['SIMPLE']",
+      "when": "scored",
+      "then": "scoreBreakdown.styleMatch == 0.50 (FR-7 compatibility table: MODERN<->SIMPLE)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-9",
+      "given": "resolvedStyle='MODERN' and a desk with styleTags=['CLASSIC']",
+      "when": "scored",
+      "then": "scoreBreakdown.styleMatch == 0.10",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-10",
+      "given": "space.mainColor='#E8D9B0' and an item with colorHex='#E8C9A0' (close hue)",
+      "when": "scored",
+      "then": "scoreBreakdown.colorHarmony >= 0.85",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-11",
+      "given": "space.mainColor='#E8D9B0' (beige, hue ~40) and an item with colorHex='#106090' (deep blue-cyan, hue ~200)",
+      "when": "scored",
+      "then": "scoreBreakdown.colorHarmony <= 0.55",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-12",
+      "given": "detectedObjects=[{'type':'bed','confidence':0.82,...}] and a catalog with two beds and two desks",
+      "when": "scored",
+      "then": "every bed in recommendations.bed has objectConflict == 0.20; every desk has objectConflict == 1.00",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-13",
+      "given": "detectedObjects=[{'type':'lighting','confidence':0.9,...}] and a lighting item in the catalog",
+      "when": "scored",
+      "then": "that lighting item's scoreBreakdown.objectConflict == 1.00 (FR-8 exception: lighting never penalized)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-14",
+      "given": "two items in the same category with identical fitScore",
+      "when": "ranked",
+      "then": "the one with the lower price appears first; if prices tie, the one with the lexicographically lower furnitureId appears first",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-15",
+      "given": "the Python source src/ai/app/analyzers/recommender.py",
+      "when": "grepped",
+      "then": "file contains literal numeric weights 0.35 (sizeFit), 0.30 (styleMatch), 0.20 (colorHarmony), 0.15 (objectConflict), and no other weight set summing to 1.0 appears",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-16",
+      "given": "preferredStyle='CURRENT' and detectedStyle='INDUSTRIAL'",
+      "when": "POST /recommend/furniture is called",
+      "then": "response resolvedStyle == 'INDUSTRIAL'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-17",
+      "given": "preferredStyle='CURRENT' and detectedStyle=null",
+      "when": "POST /recommend/furniture is called",
+      "then": "response resolvedStyle == 'MODERN' (FR-4 documented default fallback)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-18",
+      "given": "preferredStyle='SIMPLE' and detectedStyle='INDUSTRIAL'",
+      "when": "POST /recommend/furniture is called",
+      "then": "response resolvedStyle == 'SIMPLE' (explicit user choice overrides detected)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-19",
+      "given": "a tiny room (widthM=1.5, lengthM=1.5) and a catalog where every item's longer dimension is >= 140 cm",
+      "when": "POST /recommend/furniture is called",
+      "then": "response is HTTP 200, every category array is empty [], warning == 'NO_FIT_ANY_CATEGORY'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-20",
+      "given": "a request with catalog=[]",
+      "when": "posted to /recommend/furniture",
+      "then": "response is HTTP 422 with body {errorCode:'CATALOG_EMPTY', message:<string>, roomId:<string>}",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-21",
+      "given": "a request with preferredStyle='BAROQUE'",
+      "when": "posted to /recommend/furniture",
+      "then": "response is HTTP 422 with errorCode:'INVALID_REQUEST'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-22",
+      "given": "src/ai/app/routes/recommend.py",
+      "when": "read",
+      "then": "the handler is declared async def",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-23",
+      "given": "src/ai/pyproject.toml (or requirements.txt)",
+      "when": "re-running Task 3 AC-2",
+      "then": "it still passes: torch, tensorflow, keras, transformers, ultralytics absent from runtime deps",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-24",
+      "given": "src/backend/src/main/resources/db/migration/",
+      "when": "listed",
+      "then": "V4__extend_furniture_catalog.sql exists AND contains ALTER TABLE furniture, ADD COLUMN name, ADD COLUMN price, ADD COLUMN image_url, ADD COLUMN color_hex, ADD COLUMN width_cm, ADD COLUMN length_cm, ADD COLUMN height_cm, ADD COLUMN style_tags",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-25",
+      "given": "the migration directory",
+      "when": "listed and the app boots",
+      "then": "V5__seed_furniture_catalog.sql exists; SELECT COUNT(*) FROM furniture returns >= 24 AND there are >= 6 rows per type for each of desk/bed/chair/lighting",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-26",
+      "given": "the seeded catalog",
+      "when": "queried",
+      "then": "(a) at least one row per type has max(width_cm,length_cm) > 400; (b) every PreferredStyle enum value (except CURRENT) appears in at least one row's style_tags across the full catalog",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-27",
+      "given": "RecommendationClient.java",
+      "when": "inspected",
+      "then": "it has a public method RecommendationResponse callRecommend(RecommendationRequest req) with exactly one parameter of type RecommendationRequest",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-28",
+      "given": "a spaces row for u1 with roomId='r1', status='ANALYZED', dimensions='4.0x4.0x2.4m', main_color='#E8D9B0', style='MODERN', preferred_style='MODERN', and a seeded furniture catalog",
+      "when": "GET /api/v1/spaces/r1/recommendations is called with X-User-Id: u1",
+      "then": "response is HTTP 200; body has cacheHit==false, resolvedStyle=='MODERN', preferredStyle=='MODERN', all four category arrays present, warning==null",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-29",
+      "given": "AC-28 just ran",
+      "when": "the identical GET request is made again",
+      "then": "response is HTTP 200 with cacheHit==true AND generatedAt equals the timestamp from the first response AND the Python stub call count remains at 1 (no second call)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-30",
+      "given": "the cache is populated (AC-28 ran once)",
+      "when": "PUT /api/v1/spaces/r1/preferred-style {'preferredStyle':'SIMPLE'} is executed, then GET /api/v1/spaces/r1/recommendations is called",
+      "then": "the second GET has cacheHit==false AND resolvedStyle=='SIMPLE' AND the Python stub was called a second time (WireMock count == 2)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-31",
+      "given": "a spaces row with status='PENDING_ANALYSIS'",
+      "when": "GET /api/v1/spaces/{roomId}/recommendations is called",
+      "then": "response is HTTP 409 with errorCode=='ANALYSIS_NOT_READY'; no Python call is made",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-32",
+      "given": "a spaces row with status='ANALYZED' but preferred_style IS NULL",
+      "when": "GET /api/v1/spaces/{roomId}/recommendations is called",
+      "then": "response is HTTP 409 with errorCode=='PREFERRED_STYLE_NOT_SET'; no Python call is made",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-33",
+      "given": "a spaces row owned by u1",
+      "when": "GET /api/v1/spaces/{roomId}/recommendations is called with X-User-Id: u2",
+      "then": "response is HTTP 403 with errorCode=='SPACE_ACCESS_DENIED'; no recommendation data is leaked",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-34",
+      "given": "no spaces row for roomId='ghost'",
+      "when": "GET /api/v1/spaces/ghost/recommendations is called",
+      "then": "response is HTTP 404 with errorCode=='SPACE_NOT_FOUND'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-35",
+      "given": "AC-28 setup",
+      "when": "GET is called with ?topNPerCategory=11 (or 0, or negative)",
+      "then": "response is HTTP 400 with errorCode=='INVALID_TOP_N'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-36",
+      "given": "AC-28 setup but the Python service port is closed (or WireMock returns connection-reset)",
+      "when": "GET is called",
+      "then": "response is HTTP 502 with errorCode=='AI_SERVICE_UNAVAILABLE' AND the cache is NOT populated for this (roomId, preferredStyle) key",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-37",
+      "given": "WireMock returns {errorCode:'CATALOG_EMPTY'} 422 on the Python stub (or the furniture table is truncated)",
+      "when": "GET is called",
+      "then": "Spring responds HTTP 422 with errorCode=='CATALOG_EMPTY'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-38",
+      "given": "AC-28 setup",
+      "when": "Spring assembles the Python request (captured via WireMock request body)",
+      "then": "the request body's space.detectedObjects is [] (empty array, not missing, not null)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-39",
+      "given": "AC-28 setup",
+      "when": "inspecting the response",
+      "then": "for each of the four categories' first (top-1) item, scoreBreakdown.styleMatch >= 0.50",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-40",
+      "given": "AC-28 setup with room dimensions 4.0x4.0x2.4",
+      "when": "inspecting every item in the response across all four categories",
+      "then": "for each item: max(widthCm, lengthCm) <= 370 AND heightCm <= 220",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-41",
+      "given": "AC-28 setup",
+      "when": "inspecting each category array",
+      "then": "fitScore[i] >= fitScore[i+1] for all adjacent pairs; for any adjacent pair with equal fitScore, price[i] <= price[i+1]",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-42",
+      "given": "Furniture.java",
+      "when": "inspected",
+      "then": "class has fields name(String), price(int), imageUrl(String nullable), colorHex(String), widthCm(int), lengthCm(int), heightCm(int), styleTags(String) each annotated @Column(name=<snake_case>); AND public method List<String> getStyleTagsList() exists",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-43",
+      "given": "src/backend/src/main/resources/application.yml",
+      "when": "parsed",
+      "then": "keys app.ai.recommend.base-url, app.ai.recommend.connect-timeout-ms, app.ai.recommend.read-timeout-ms, app.recommendation.cache.ttl-seconds, app.recommendation.cache.max-entries, app.recommendation.default-top-n all present with FR-21 defaults (2000, 15000, 600, 1024, 3)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-44",
+      "given": "src/mobile/src/screens/RecommendationScreen.tsx rendered with a mocked getRecommendations returning two items per category and preferredStyle='MODERN'",
+      "when": "the render completes",
+      "then": "output contains all four Korean section headers '책상','침대','의자','조명', contains '모던 스타일 추천', and renders 8 item cards total",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-45",
+      "given": "AC-44 setup with an item name='Oslo Slim Desk', price=189000, fitScore=0.87, rationale='모던 스타일 일치, 공간에 여유롭게 들어맞음'",
+      "when": "rendered",
+      "then": "card contains substrings 'Oslo Slim Desk', '₩189,000', '매칭 87%', and the rationale text (possibly truncated)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-46",
+      "given": "a mocked response where recommendations.bed = []",
+      "when": "RecommendationScreen is rendered",
+      "then": "the bed section renders the placeholder '침대는 현재 추천할 가구가 없습니다.'; no bed cards are rendered",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-47",
+      "given": "a mocked response with all four arrays empty and warning=='NO_FIT_ANY_CATEGORY'",
+      "when": "RecommendationScreen is rendered",
+      "then": "screen contains substring '딱 맞는 가구를 찾지 못했' AND a '스타일 다시 선택' button; tapping it invokes navigation.goBack() exactly once",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-48",
+      "given": "AC-45 setup",
+      "when": "the user taps the '위시리스트에 추가' button on an item",
+      "then": "the analytics stub receives event wishlist_add_clicked with {roomId, furnitureId} exactly once AND a toast appears with copy '위시리스트 기능은 준비 중입니다.'; no network call to any /wishlist endpoint occurs",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-49",
+      "given": "a mocked 409 response with errorCode=='PREFERRED_STYLE_NOT_SET'",
+      "when": "the screen mounts",
+      "then": "error UI shows '스타일을 먼저 선택해주세요.' AND a '스타일 선택' button; tapping it invokes navigation.goBack() once",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-50",
+      "given": "a never-resolving mocked getRecommendations",
+      "when": "the screen is mounted and 500 ms pass on a fake timer",
+      "then": "screen renders a spinner AND the text '추천을 준비하고 있어요...'",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-51",
+      "given": "artifacts/UC-01-recommendation/api_contract.yaml",
+      "when": "parsed as OpenAPI 3.0.x",
+      "then": "defines (a) Python POST /recommend/furniture with full schemas per FR-2; (b) Spring GET /api/v1/spaces/{roomId}/recommendations with extended response schema (cacheHit, preferredStyle, warning); (c) all error envelopes; (d) all four type enum values (desk, bed, chair, lighting) appear in the item schema",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-52",
+      "given": "the full verification suite",
+      "when": "re-running UC-01-style-selection AC-1..AC-37",
+      "then": "all pass; V4 and V5 migrations run after V3 without collision",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-53",
+      "given": "the full verification suite",
+      "when": "re-running UC-01-space-analysis and UC-01-photo-upload ACs",
+      "then": "all pass; no changes to /analyze/space, /analyze/style, upload endpoint, or V1..V3 migrations",
+      "test_type": "integration"
+    }
+  ]
+}

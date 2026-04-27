@@ -1,0 +1,444 @@
+openapi: 3.0.3
+info:
+  title: AuthenticSelf — UC-01-recommendation API contract
+  version: "0.5.0"
+  description: |
+    Contract covering the two recommendation endpoints introduced by
+    Task 5 (UC-01-recommendation):
+
+    * Python FastAPI `POST /recommend/furniture` — internal route
+      consumed by the Spring orchestrator (FR-1 / FR-2).
+    * Spring REST `GET /api/v1/spaces/{roomId}/recommendations` —
+      public endpoint consumed by the React-Native client (FR-19).
+
+servers:
+  - url: http://localhost:8001
+    description: Python AI service (internal — not routed via gateway)
+  - url: http://localhost:8080
+    description: Spring public API
+
+tags:
+  - name: python-ai
+    description: Internal AI-service routes, callable from Spring only.
+  - name: spring-public
+    description: Public REST surface consumed by the RN client.
+
+paths:
+  # =====================================================================
+  # Python — POST /recommend/furniture (FR-1 / FR-2)
+  # =====================================================================
+  /recommend/furniture:
+    post:
+      tags: [python-ai]
+      operationId: recommendFurniture
+      summary: Cross-validate space + preferredStyle against a catalog.
+      description: |
+        Returns a ranked top-N per category (`desk`, `bed`, `chair`,
+        `lighting`). Scoring is deterministic rule-based — see FR-5..FR-10.
+        Items that cannot physically fit the room are dropped (not
+        returned with `fitScore=0`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendRequest'
+            examples:
+              modern:
+                summary: Happy path — MODERN room with a 24-item catalog.
+                value:
+                  roomId: "r_integ_01"
+                  userId: "u1"
+                  space:
+                    dimensions: { widthM: 4.0, lengthM: 4.0, heightM: 2.4, areaM2: 16.0 }
+                    mainColor: "#E8D9B0"
+                    detectedStyle: "MODERN"
+                    detectedObjects: []
+                  preferredStyle: "MODERN"
+                  topNPerCategory: 3
+                  catalog:
+                    - furnitureId: "f_desk_001"
+                      type: "desk"
+                      name: "Oslo Slim Desk"
+                      styleTags: ["MODERN"]
+                      widthCm: 120
+                      lengthCm: 60
+                      heightCm: 74
+                      colorHex: "#F3E6D2"
+                      price: 189000
+                      imageUrl: "https://cdn.example.com/f_desk_001.jpg"
+      responses:
+        '200':
+          description: Ranked recommendations. May include `warning=NO_FIT_ANY_CATEGORY`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendResponse'
+        '422':
+          description: Validation or deterministic-business error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PythonErrorResponse'
+              examples:
+                catalogEmpty:
+                  value:
+                    errorCode: "CATALOG_EMPTY"
+                    message: "Catalog is empty; nothing to rank."
+                    roomId: "r_integ_01"
+                invalid:
+                  value:
+                    errorCode: "INVALID_REQUEST"
+                    message: "Request body failed validation."
+                    roomId: null
+        '500':
+          description: Unexpected internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PythonErrorResponse'
+
+  # =====================================================================
+  # Spring — GET /api/v1/spaces/{roomId}/recommendations (FR-19)
+  # =====================================================================
+  /api/v1/spaces/{roomId}/recommendations:
+    get:
+      tags: [spring-public]
+      operationId: getSpaceRecommendations
+      summary: Fetch ranked furniture recommendations for a room.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - in: header
+          name: X-User-Id
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - in: query
+          name: topNPerCategory
+          required: false
+          description: 1..10, default 3.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+            default: 3
+      responses:
+        '200':
+          description: Recommendations (may have `warning=NO_FIT_ANY_CATEGORY`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringRecommendationsResponse'
+        '400':
+          description: INVALID_TOP_N — topNPerCategory out of 1..10.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+              examples:
+                invalidTopN:
+                  value:
+                    errorCode: "INVALID_TOP_N"
+                    message: "요청한 추천 개수가 잘못되었습니다. 1에서 10 사이의 값을 사용해주세요."
+                    correlationId: "6b1..."
+        '401':
+          description: MISSING_USER_HEADER — X-User-Id absent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+        '403':
+          description: SPACE_ACCESS_DENIED — `X-User-Id` does not match `space.user_id`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+        '404':
+          description: SPACE_NOT_FOUND.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+        '409':
+          description: ANALYSIS_NOT_READY or PREFERRED_STYLE_NOT_SET.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+              examples:
+                analysisNotReady:
+                  value:
+                    errorCode: "ANALYSIS_NOT_READY"
+                    message: "사진 분석이 아직 완료되지 않았습니다."
+                    correlationId: "abc..."
+                preferredNotSet:
+                  value:
+                    errorCode: "PREFERRED_STYLE_NOT_SET"
+                    message: "원하는 스타일을 먼저 선택해주세요."
+                    correlationId: "def..."
+        '422':
+          description: CATALOG_EMPTY or RECOMMENDATION_FAILED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+        '502':
+          description: AI_SERVICE_UNAVAILABLE — Python transport failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+
+components:
+  schemas:
+
+    # ---------- shared enums ----------
+    FurnitureType:
+      type: string
+      enum: [desk, bed, chair, lighting]
+      description: Four PRD categories (FR-3).
+    PreferredStyle:
+      type: string
+      enum: [CURRENT, MODERN, SIMPLE, CLASSIC, SCANDINAVIAN, INDUSTRIAL]
+    DetectedStyle:
+      type: string
+      nullable: true
+      enum: [MODERN, SIMPLE, CLASSIC, SCANDINAVIAN, INDUSTRIAL]
+      description: Null when Task-4 style analysis transport-failed.
+    ResolvedStyle:
+      type: string
+      enum: [MODERN, SIMPLE, CLASSIC, SCANDINAVIAN, INDUSTRIAL]
+      description: Never CURRENT (FR-4 substitutes).
+    Warning:
+      type: string
+      nullable: true
+      enum: [null, NO_FIT_ANY_CATEGORY]
+
+    # ---------- scoring ----------
+    ScoreBreakdown:
+      type: object
+      required: [sizeFit, styleMatch, colorHarmony, objectConflict]
+      properties:
+        sizeFit:        { type: number, format: float, minimum: 0, maximum: 1 }
+        styleMatch:     { type: number, format: float, minimum: 0, maximum: 1 }
+        colorHarmony:   { type: number, format: float, minimum: 0, maximum: 1 }
+        objectConflict: { type: number, format: float, minimum: 0, maximum: 1 }
+
+    RecommendationItem:
+      type: object
+      required:
+        [furnitureId, name, type, price, fitScore, scoreBreakdown, rationale]
+      properties:
+        furnitureId:
+          type: string
+          example: "f_desk_001"
+        name:
+          type: string
+          example: "Oslo Slim Desk"
+        type:
+          $ref: '#/components/schemas/FurnitureType'
+        price:
+          type: integer
+          description: KRW integer won.
+          example: 189000
+        imageUrl:
+          type: string
+          nullable: true
+          example: "https://cdn.example.com/f_desk_001.jpg"
+        fitScore:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Round to 2 dp (FR-2).
+        scoreBreakdown:
+          $ref: '#/components/schemas/ScoreBreakdown'
+        rationale:
+          type: string
+          description: Korean, <= 120 chars (FR-10).
+
+    RecommendationsByCategory:
+      type: object
+      required: [desk, bed, chair, lighting]
+      additionalProperties: false
+      properties:
+        desk:
+          type: array
+          items: { $ref: '#/components/schemas/RecommendationItem' }
+        bed:
+          type: array
+          items: { $ref: '#/components/schemas/RecommendationItem' }
+        chair:
+          type: array
+          items: { $ref: '#/components/schemas/RecommendationItem' }
+        lighting:
+          type: array
+          items: { $ref: '#/components/schemas/RecommendationItem' }
+
+    # ---------- Python request ----------
+    Dimensions:
+      type: object
+      required: [widthM, lengthM, heightM]
+      properties:
+        widthM:  { type: number, format: float, exclusiveMinimum: 0 }
+        lengthM: { type: number, format: float, exclusiveMinimum: 0 }
+        heightM: { type: number, format: float, exclusiveMinimum: 0 }
+        areaM2:  { type: number, format: float, nullable: true, minimum: 0 }
+
+    DetectedObject:
+      type: object
+      required: [type, bboxNorm, confidence]
+      properties:
+        type: { type: string, minLength: 1, maxLength: 64 }
+        bboxNorm:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { type: number, format: float, minimum: 0, maximum: 1 }
+        confidence: { type: number, format: float, minimum: 0, maximum: 1 }
+
+    SpaceBlock:
+      type: object
+      required: [dimensions, mainColor]
+      properties:
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        mainColor:
+          type: string
+          pattern: "^#[0-9A-Fa-f]{6}$"
+          example: "#E8D9B0"
+        detectedStyle: { $ref: '#/components/schemas/DetectedStyle' }
+        detectedObjects:
+          type: array
+          items: { $ref: '#/components/schemas/DetectedObject' }
+
+    CatalogItem:
+      type: object
+      required:
+        [furnitureId, type, name, styleTags, widthCm, lengthCm, heightCm,
+         colorHex, price]
+      properties:
+        furnitureId: { type: string, minLength: 1, maxLength: 64 }
+        type:        { $ref: '#/components/schemas/FurnitureType' }
+        name:        { type: string, minLength: 1, maxLength: 200 }
+        styleTags:
+          type: array
+          items: { type: string }
+        widthCm:  { type: integer, minimum: 1 }
+        lengthCm: { type: integer, minimum: 1 }
+        heightCm: { type: integer, minimum: 1 }
+        colorHex:
+          type: string
+          pattern: "^#[0-9A-Fa-f]{6}$"
+        price:       { type: integer, minimum: 0 }
+        imageUrl:    { type: string, nullable: true }
+
+    RecommendRequest:
+      type: object
+      required: [roomId, userId, space, preferredStyle, catalog]
+      additionalProperties: false
+      properties:
+        roomId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: "^[A-Za-z0-9_-]+$"
+        userId:
+          type: string
+          minLength: 1
+          maxLength: 64
+        space: { $ref: '#/components/schemas/SpaceBlock' }
+        preferredStyle: { $ref: '#/components/schemas/PreferredStyle' }
+        catalog:
+          type: array
+          items: { $ref: '#/components/schemas/CatalogItem' }
+        topNPerCategory:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 3
+
+    # ---------- Python response ----------
+    RecommendResponse:
+      type: object
+      required:
+        [roomId, status, resolvedStyle, generatedAt, recommendations,
+         processingMs]
+      properties:
+        roomId:
+          type: string
+        status:
+          type: string
+          enum: [OK]
+        resolvedStyle: { $ref: '#/components/schemas/ResolvedStyle' }
+        generatedAt:
+          type: string
+          format: date-time
+          example: "2026-04-18T09:14:22Z"
+        recommendations: { $ref: '#/components/schemas/RecommendationsByCategory' }
+        warning:         { $ref: '#/components/schemas/Warning' }
+        processingMs:
+          type: integer
+          minimum: 0
+
+    # ---------- Python error envelope ----------
+    PythonErrorResponse:
+      type: object
+      required: [errorCode, message]
+      properties:
+        errorCode:
+          type: string
+          enum:
+            [INVALID_REQUEST, IMAGE_NOT_FOUND, IMAGE_READ_FAILED,
+             ANALYSIS_FAILED, CATALOG_EMPTY, RECOMMENDATION_FAILED,
+             INTERNAL_ERROR]
+        message:
+          type: string
+        roomId:
+          type: string
+          nullable: true
+
+    # ---------- Spring public response ----------
+    SpringRecommendationsResponse:
+      type: object
+      required:
+        [roomId, status, resolvedStyle, preferredStyle, generatedAt,
+         cacheHit, recommendations]
+      description: |
+        Wraps the Python `RecommendResponse` with two Spring-only fields
+        (`preferredStyle`, `cacheHit`). `warning` is always present in
+        the body (JSON-included even when null — see
+        `RecommendationsApiResponse`).
+      properties:
+        roomId:         { type: string }
+        status:         { type: string, enum: [OK] }
+        resolvedStyle:  { $ref: '#/components/schemas/ResolvedStyle' }
+        preferredStyle: { $ref: '#/components/schemas/PreferredStyle' }
+        generatedAt:
+          type: string
+          format: date-time
+        cacheHit:       { type: boolean }
+        recommendations: { $ref: '#/components/schemas/RecommendationsByCategory' }
+        warning:         { $ref: '#/components/schemas/Warning' }
+        processingMs:    { type: integer, minimum: 0 }
+
+    # ---------- Spring error envelope ----------
+    SpringErrorResponse:
+      type: object
+      required: [errorCode, message, correlationId]
+      properties:
+        errorCode:
+          type: string
+          enum:
+            [MISSING_USER_HEADER, INVALID_TOP_N,
+             SPACE_NOT_FOUND, SPACE_ACCESS_DENIED,
+             ANALYSIS_NOT_READY, PREFERRED_STYLE_NOT_SET,
+             CATALOG_EMPTY, RECOMMENDATION_FAILED,
+             AI_SERVICE_UNAVAILABLE,
+             INVALID_PREFERRED_STYLE]
+        message:
+          type: string
+        correlationId:
+          type: string
+          description: UUID emitted by the error advice (FR-22).

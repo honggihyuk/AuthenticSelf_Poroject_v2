@@ -1,0 +1,74 @@
+# =====================================================================
+# AuthenticSelf — top-level ignores
+# =====================================================================
+
+# ---- Secrets & local env ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Gradle / Java build ----
+build/
+.gradle/
+out/
+*.class
+*.jar
+*.war
+!gradle/wrapper/gradle-wrapper.jar
+hs_err_pid*.log
+
+# ---- Maven (in case modules use it) ----
+target/
+
+# ---- Node / React Native ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+
+# ---- Python / AI service ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# ---- Unity (AR) ----
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Mm]emoryCaptures/
+UserSettings/
+
+# ---- IDE / editor ----
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+*.swp
+*.swo
+
+# ---- OS noise ----
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---- Logs ----
+*.log
+logs/

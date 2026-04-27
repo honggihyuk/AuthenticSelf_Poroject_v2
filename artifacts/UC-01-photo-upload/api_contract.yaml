@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: AuthenticSelf — Photo Upload API
+  version: 0.1.0
+  description: |
+    REST contract for **UC-01-photo-upload**.
+    Defines the single endpoint `POST /api/v1/spaces/photo`.
+    Error envelope shape and codes mirror `spec.md` FR-6.
+
+servers:
+  - url: http://localhost:8080
+    description: Local dev (Spring Boot default)
+
+tags:
+  - name: spaces
+    description: Room / space lifecycle endpoints.
+
+paths:
+  /api/v1/spaces/photo:
+    post:
+      tags: [spaces]
+      operationId: uploadSpacePhoto
+      summary: Upload one room photo and create a PENDING_ANALYSIS space row.
+      description: |
+        Accepts a single image file as `multipart/form-data`, validates it
+        (MIME, size, decodability, resolution), persists the blob to object
+        storage, and creates a new `spaces` row with `status='PENDING_ANALYSIS'`.
+        The AI space-analysis task (UC-01-space-analysis) will later fill in
+        `dimensions`, `mainColor`, `style`, `analysisDate`.
+      parameters:
+        - in: header
+          name: X-User-Id
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+          description: Header-based user stub (real auth is out of scope for UC-01).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: |
+                    The raw image bytes. MIME in {image/jpeg, image/png, image/webp},
+                    size ≤ 10 MB, decodable by ImageIO, ≥ 640x480.
+      responses:
+        '201':
+          description: Upload accepted; space row created in PENDING_ANALYSIS.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadPhotoResponse' }
+              examples:
+                ok:
+                  value:
+                    roomId: '01HXYB2K9VQWM4P3ZT6N5C8DAE'
+                    uploadUrl: 'file:///C:/AuthenticSelf_Project/.../spaces/2026/04/17/01HXYB2K9VQWM4P3ZT6N5C8DAE.jpg'
+                    status: 'PENDING_ANALYSIS'
+        '400':
+          description: Validation error (EMPTY_FILE).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                emptyFile:
+                  value: { errorCode: 'EMPTY_FILE', message: '업로드된 파일이 비어 있습니다. 다시 시도해주세요.', correlationId: '9b1e4c12-3e61-4b4f-9c54-a7b7a1dbe0f7' }
+        '401':
+          description: Auth-stub failure (MISSING_USER_HEADER | UNKNOWN_USER).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                missingHeader:
+                  value: { errorCode: 'MISSING_USER_HEADER', message: '사용자 인증 정보가 없습니다. 앱을 다시 시작해주세요.', correlationId: 'd4a1…' }
+                unknownUser:
+                  value: { errorCode: 'UNKNOWN_USER', message: '존재하지 않는 사용자입니다.', correlationId: 'd4a2…' }
+        '413':
+          description: Payload exceeds 10 MB (FILE_TOO_LARGE).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                tooLarge:
+                  value: { errorCode: 'FILE_TOO_LARGE', message: '파일 용량이 너무 큽니다. 10MB 이하의 사진을 업로드해주세요.', correlationId: 'd4a3…' }
+        '415':
+          description: Disallowed MIME type (UNSUPPORTED_MEDIA_TYPE).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                unsupported:
+                  value: { errorCode: 'UNSUPPORTED_MEDIA_TYPE', message: '지원하지 않는 이미지 형식입니다. JPG, PNG, WEBP만 업로드할 수 있습니다.', correlationId: 'd4a4…' }
+        '422':
+          description: Semantic-validation failure (IMAGE_UNREADABLE | RESOLUTION_TOO_LOW).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                unreadable:
+                  value: { errorCode: 'IMAGE_UNREADABLE', message: '이미지를 읽을 수 없습니다. 다른 사진으로 다시 시도해주세요.', correlationId: 'd4a5…' }
+                lowResolution:
+                  value: { errorCode: 'RESOLUTION_TOO_LOW', message: '업로드한 사진의 해상도가 너무 낮습니다. 640x480 이상 이미지를 올려주세요.', correlationId: 'd4a6…' }
+        '500':
+          description: Server-side storage or DB failure (STORAGE_PERSIST_FAILED).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                persistFailed:
+                  value: { errorCode: 'STORAGE_PERSIST_FAILED', message: '일시적인 오류로 사진 저장에 실패했습니다. 잠시 후 다시 시도해주세요.', correlationId: 'd4a7…' }
+
+components:
+  schemas:
+    UploadPhotoResponse:
+      type: object
+      required: [roomId, uploadUrl, status]
+      properties:
+        roomId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Server-generated identifier for the new space row.
+        uploadUrl:
+          type: string
+          description: Reference URL for the stored blob (dev: file://…).
+        status:
+          type: string
+          enum: [PENDING_ANALYSIS]
+          description: Always PENDING_ANALYSIS at this stage — UC-01-space-analysis flips it.
+    ErrorResponse:
+      type: object
+      required: [errorCode, message, correlationId]
+      properties:
+        errorCode:
+          type: string
+          enum:
+            - EMPTY_FILE
+            - MISSING_USER_HEADER
+            - UNKNOWN_USER
+            - UNSUPPORTED_MEDIA_TYPE
+            - FILE_TOO_LARGE
+            - IMAGE_UNREADABLE
+            - RESOLUTION_TOO_LOW
+            - STORAGE_PERSIST_FAILED
+          description: Machine-matchable failure code; maps to errorMessages.ts on the RN client.
+        message:
+          type: string
+          description: Human-readable Korean message.
+        correlationId:
+          type: string
+          format: uuid
+          description: UUIDv4 stitched into server logs for diagnosis.

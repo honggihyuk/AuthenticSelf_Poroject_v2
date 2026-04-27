@@ -1,0 +1,160 @@
+{
+  "taskId": "UC-01-photo-upload",
+  "specPath": "artifacts/UC-01-photo-upload/spec.md",
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "given": "the repository",
+      "when": "listing src/backend/src/main/resources/db/migration/",
+      "then": "a file named exactly V2__add_spaces_status_and_photo.sql exists and is the only V2__*.sql file",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-2",
+      "given": "a fresh MySQL 8 schema with V1 applied",
+      "when": "Spring Boot starts with Flyway enabled",
+      "then": "flyway_schema_history contains two rows (version=1, version=2), both success=1",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-3",
+      "given": "V2 migration has run",
+      "when": "executing SHOW COLUMNS FROM spaces",
+      "then": "result contains photo_url VARCHAR(512) NOT NULL, original_filename VARCHAR(255) NULL, content_type VARCHAR(64) NOT NULL, file_size_bytes BIGINT NOT NULL, status ENUM('PENDING_ANALYSIS','ANALYZED','FAILED') NOT NULL DEFAULT 'PENDING_ANALYSIS', uploaded_at DATETIME NOT NULL",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-4",
+      "given": "V2 migration has run",
+      "when": "executing SHOW COLUMNS FROM spaces",
+      "then": "dimensions, main_color, style, analysis_date all show Null=YES (nullable)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-5",
+      "given": "V2 migration has run",
+      "when": "executing SHOW INDEX FROM spaces WHERE Key_name='idx_spaces_status'",
+      "then": "exactly one row returns with Column_name='status'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-6",
+      "given": "a user u1 exists in users and a 2 MB 1920x1080 JPEG is prepared",
+      "when": "a client sends POST /api/v1/spaces/photo with X-User-Id: u1 and the file part",
+      "then": "response is HTTP 201 with JSON body containing non-empty roomId (<=64 chars), non-empty uploadUrl, status='PENDING_ANALYSIS'; file exists at the object-storage path; one row exists in spaces with matching room_id, user_id='u1', status='PENDING_ANALYSIS', dimensions IS NULL, analysis_date IS NULL",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-7",
+      "given": "the POST /api/v1/spaces/photo endpoint",
+      "when": "POSTing multipart request with no file part and valid X-User-Id header",
+      "then": "response is HTTP 400 with JSON body errorCode='EMPTY_FILE'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-8",
+      "given": "the POST /api/v1/spaces/photo endpoint",
+      "when": "POSTing a valid file but omitting the X-User-Id header",
+      "then": "response is HTTP 401 with JSON body errorCode='MISSING_USER_HEADER'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-9",
+      "given": "no row with user_id='ghost' exists in users",
+      "when": "POSTing a valid file with header X-User-Id: ghost",
+      "then": "response is HTTP 401 with JSON body errorCode='UNKNOWN_USER'; no spaces row is inserted; no blob is written",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-10",
+      "given": "a 500 KB file whose content-type is image/gif",
+      "when": "POSTed to /api/v1/spaces/photo",
+      "then": "response is HTTP 415 with JSON body errorCode='UNSUPPORTED_MEDIA_TYPE'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-11",
+      "given": "a 12 MB JPEG file",
+      "when": "POSTed to /api/v1/spaces/photo",
+      "then": "response is HTTP 413 with JSON body errorCode='FILE_TOO_LARGE'; no blob is written; no DB row is inserted",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-12",
+      "given": "a file with .jpg extension and image/jpeg MIME whose bytes are random garbage",
+      "when": "POSTed to /api/v1/spaces/photo",
+      "then": "response is HTTP 422 with JSON body errorCode='IMAGE_UNREADABLE'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-13",
+      "given": "a 500x500 PNG image",
+      "when": "POSTed to /api/v1/spaces/photo",
+      "then": "response is HTTP 422 with JSON body errorCode='RESOLUTION_TOO_LOW'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-14",
+      "given": "a test double where ObjectStorageService.put() succeeds but the spaces INSERT throws",
+      "when": "the endpoint is invoked with a valid file",
+      "then": "response is HTTP 500 with errorCode='STORAGE_PERSIST_FAILED'; ObjectStorageService.delete(objectKey) was called exactly once; spaces table has no new row",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-15",
+      "given": "the backend source tree",
+      "when": "searching src/backend/src/main/java/**/*.java outside com/authenticself/storage/**",
+      "then": "zero matches for the regex (software\\.amazon\\.awssdk|com\\.google\\.cloud\\.storage|com\\.azure\\.storage); controller/service/repository layers import only com.authenticself.storage.ObjectStorageService",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-16",
+      "given": "two consecutive successful uploads from the same user on the same day",
+      "when": "inspecting the object-storage root",
+      "then": "the keys match regex spaces/\\d{4}/\\d{2}/\\d{2}/[A-Za-z0-9_-]{20,64}\\.(jpg|png|webp) and are distinct",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-17",
+      "given": "the React Native app",
+      "when": "rendering HomeScreen",
+      "then": "a button with exact visible label '방 사진 하나로 가구 추천' exists and navigates to UploadScreen on press",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-18",
+      "given": "a mocked upload API returning 201 {roomId:'r1', ...}",
+      "when": "the user picks a valid image in UploadScreen and taps '업로드'",
+      "then": "a progress indicator is rendered while the request is in flight, and navigation to AnalyzingScreen occurs with route param roomId='r1'",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-19",
+      "given": "the module src/mobile/src/api/errorMessages.ts",
+      "when": "imported",
+      "then": "it exports a mapping object whose keys include all eight errorCode values (EMPTY_FILE, MISSING_USER_HEADER, UNKNOWN_USER, UNSUPPORTED_MEDIA_TYPE, FILE_TOO_LARGE, IMAGE_UNREADABLE, RESOLUTION_TOO_LOW, STORAGE_PERSIST_FAILED) and whose values are non-empty Korean strings",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-20",
+      "given": "the artifact artifacts/UC-01-photo-upload/api_contract.yaml",
+      "when": "parsed as OpenAPI 3.0.x",
+      "then": "it defines POST /api/v1/spaces/photo with multipart/form-data request body containing a binary file part, a required X-User-Id header, responses 201/400/401/413/415/422/500, and references a shared ErrorResponse schema with fields errorCode, message, correlationId",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-21",
+      "given": "src/backend/src/main/resources/application.yml",
+      "when": "parsed",
+      "then": "keys app.storage.local.root, app.upload.max-size-bytes, app.upload.min-width, app.upload.min-height, app.upload.allowed-content-types are all present with defaults ./var/object-storage, 10485760, 640, 480, and image/jpeg,image/png,image/webp respectively",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-22",
+      "given": "V2 migration has run",
+      "when": "re-running the Task-1 verification suite against spaces",
+      "then": "AC-1, AC-3, AC-6, AC-7, AC-12 from DB-schema-init still pass (table exists, PK on room_id, FK to users still enforced, idx_spaces_user_id still present, all existing Task-1 columns still exist)",
+      "test_type": "integration"
+    }
+  ]
+}

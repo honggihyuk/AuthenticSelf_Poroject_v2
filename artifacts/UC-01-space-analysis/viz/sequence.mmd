@@ -1,0 +1,173 @@
+%% AuthenticSelf - UC-01-space-analysis: sequence diagram (PRD section 8 mirror)
+%% Two entry paths into the AI pipeline:
+%%   (a) synchronous  -> POST /internal/v1/spaces/{roomId}/analyze (FR-13)
+%%   (b) asynchronous -> AnalysisPoller @Scheduled sweep           (FR-14)
+%%
+%% Source of truth:
+%%   src/backend/src/main/java/com/authenticself/ai/AIOrchestratorController.java
+%%   src/backend/src/main/java/com/authenticself/ai/AIOrchestrator.java
+%%   src/backend/src/main/java/com/authenticself/ai/SpaceAnalysisPersistence.java
+%%   src/backend/src/main/java/com/authenticself/ai/SpaceAnalysisClient.java
+%%   src/backend/src/main/java/com/authenticself/ai/AnalysisPoller.java
+%%   src/backend/src/main/java/com/authenticself/ai/AIOrchestratorExceptionAdvice.java
+%%   src/ai/app/main.py                  -> POST /analyze/space handler
+%%   src/ai/app/analyzers/{color,dimensions,style}.py
+%%
+%% PRD references: PRD section 6 UC-01 basic flow step 2 + alt flow 1-a,
+%%                 PRD section 8 "par [AI 병렬 처리]" block.
+
+sequenceDiagram
+    autonumber
+    actor Ops as Ops / Test caller
+    participant Poller as AnalysisPoller<br/>(Spring @Scheduled)<br/>FR-14 / AC-22
+    participant Ctrl as AIOrchestratorController<br/>POST /internal/v1/spaces/{roomId}/analyze<br/>FR-13
+    participant Advice as AIOrchestratorExceptionAdvice<br/>@RestControllerAdvice<br/>FR-15
+    participant Orch as AIOrchestrator<br/>@Service<br/>FR-11 / FR-12
+    participant Pers as SpaceAnalysisPersistence<br/>@Transactional(REQUIRES_NEW)<br/>FR-12 step 6
+    participant Repo as SpaceRepository<br/>JpaRepository<Space>
+    participant DB as MySQL 8<br/>spaces table
+    participant Client as SpaceAnalysisClient<br/>RestClient (Spring 6)<br/>FR-11 / AC-23 / AC-24
+    participant Py as Python FastAPI :8001<br/>POST /analyze/space<br/>src/ai/app/main.py
+    participant Color as ColorExtractor<br/>(REAL - cv2 kmeans)<br/>FR-6 / AC-12
+    participant Dims as DimensionsEstimator<br/>(placeholder - SHA-256)<br/>FR-5
+    participant Style as StyleClassifier<br/>(placeholder - UNUSED in Task 3)<br/>FR-10 - Task 4 TODO
+
+    Note over Ops,Poller: TWO entry paths feed the same AIOrchestrator.analyze(roomId).
+
+    %% ========================================================
+    %% (a) SYNCHRONOUS entry path - internal REST trigger
+    %% ========================================================
+    rect rgba(212,237,218,0.35)
+    Note over Ops,Ctrl: (a) Synchronous - FR-13 / AC-16 / AC-17 / AC-18 / AC-19 / AC-20
+    Ops->>Ctrl: POST /internal/v1/spaces/{roomId}/analyze
+    Ctrl->>Orch: analyze(roomId)
+    end
+
+    %% ========================================================
+    %% (b) ASYNCHRONOUS entry path - scheduled poller
+    %% ========================================================
+    rect rgba(204,229,255,0.35)
+    Note over Poller: (b) Async sweep - FR-14 / fixedDelay=15000ms
+    Poller->>Repo: findTop10ByStatusOrderByUploadedAtAsc(PENDING_ANALYSIS)
+    Repo->>DB: SELECT ... WHERE status='PENDING_ANALYSIS' ORDER BY uploaded_at ASC LIMIT 10
+    DB-->>Repo: rows[0..n]
+    Repo-->>Poller: List<Space>
+    loop per-row (defensive try/catch - no single bad row stalls queue)
+        Poller->>Orch: analyze(space.getRoomId())
+    end
+    end
+
+    %% ========================================================
+    %% Shared orchestrator flow (FR-12)
+    %% ========================================================
+    Orch->>Pers: loadForAnalysis(roomId)
+    activate Pers
+    Pers->>Repo: findById(roomId)
+    Repo->>DB: SELECT * FROM spaces WHERE room_id=?
+    DB-->>Repo: row or empty
+    Repo-->>Pers: Optional<Space>
+    deactivate Pers
+
+    alt roomId has no row (FR-12 step 1 / AC-20)
+        Pers-->>Orch: throw SpaceNotFoundException
+        Orch-->>Advice: propagate
+        Advice-->>Ctrl: 404 {errorCode:"SPACE_NOT_FOUND", correlationId}
+        Note over Ops,Advice: Python service is NOT called (AC-20).
+    else status != PENDING_ANALYSIS (FR-12 step 2 / AC-17 short-circuit)
+        Pers-->>Orch: Snapshot(status=ANALYZED|FAILED, photoUrl)
+        Orch-->>Ctrl: 200 {roomId, status, skipped:true, reason:"NOT_PENDING"}
+        Note over Ops,Ctrl: No HTTP call to Python. DB row unchanged.<br/>Re-calling on ANALYZED is idempotent.
+    else status == PENDING_ANALYSIS (happy path / failure path)
+        Pers-->>Orch: Snapshot(PENDING_ANALYSIS, photoUrl)
+
+        Note over Orch,Py: HTTP call runs OUTSIDE any DB tx (FR-12 step 6).<br/>No JDBC connection held during the round-trip.
+
+        %% =============================================================
+        %% PRD section 8 "par [AI 병렬 처리]" block
+        %%   Left arm wired in Task 3. Right arm is a deliberate TODO for
+        %%   UC-01-style-selection (Task 4). Shown here so the fan-out
+        %%   shape is visible from day one.
+        %% =============================================================
+        par PRD section 8 [AI 병렬 처리] - Task 4 will fan out via CompletableFuture.allOf
+            Orch->>Client: callSpaceAnalysis(roomId, photoUrl)<br/>FR-17 / AC-24 - (String, String) -> DTO
+            Client->>Py: POST /analyze/space<br/>{roomId, photoUrl}
+            activate Py
+            Py->>Py: file:// -> Path (Windows-safe unquote)<br/>+ AI_PHOTO_ROOT escape check (AC-9)
+            par Python: asyncio.gather(to_thread(dim), to_thread(color))  FR-8 / AC-10
+                Py->>Dims: DimensionsEstimator.analyze(path)
+                Dims-->>Py: SpaceAnalysisResult(widthM, lengthM, heightM=2.4, confidence)<br/>FR-5 deterministic
+            and
+                Py->>Color: ColorExtractor.analyze(path)
+                Color->>Color: cv2.imread -> downscale 256 -> BGR2RGB -> kmeans(K=5)<br/>FR-6 / AC-12
+                Color-->>Py: SpaceAnalysisResult(mainColor="#RRGGBB", confidence=dominance ratio)
+            end
+            Py->>Py: aggregate confidence = round((dim_conf + color_conf)/2, 2) (FR-9)<br/>processingMs = wall-clock (NFR - real measurement)
+            Py-->>Client: 200 {roomId, status:"OK", dimensions{widthM,lengthM,heightM,areaM2},<br/>mainColor, confidence, processingMs}
+            deactivate Py
+            Client-->>Orch: SpaceAnalysisResponse DTO
+        and Task 4 placeholder (NOT wired in Task 3)
+            Note over Orch,Style: TODO(task-4) UC-01-style-selection:<br/>StyleAnalysisClient.callStyleAnalysis(roomId, photoUrl)<br/>POST /analyze/style NOT registered (AC-13 / AC-14).<br/>StyleClassifier class exists (FR-10) but is not invoked.
+        end
+
+        alt Python 200 OK - happy path (FR-12 step 4 / AC-16)
+            Orch->>Orch: format dimensions as "{W}x{L}x{H}m"<br/>(matches AC-16 regex)
+            Orch->>Pers: markAnalyzed(roomId, dimensions, mainColor)
+            activate Pers
+            Pers->>Repo: findById + save (set dimensions, main_color, analysis_date=now, status=ANALYZED)
+            Repo->>DB: UPDATE spaces SET dimensions=?, main_color=?, analysis_date=?, status='ANALYZED'<br/>WHERE room_id=?
+            Note over Pers,DB: style column intentionally NOT written (Task 4 owns it).
+            deactivate Pers
+            Orch-->>Ctrl: SpaceAnalysisResultDTO.ofAnalyzed(roomId, dims, color, processingMs)
+            Ctrl-->>Ops: 200 {roomId, status:"ANALYZED", dimensions, mainColor, processingMs}
+
+        else Python 422 - analyzer error (FR-12 step 5 / AC-18)
+            Py-->>Client: 422 {errorCode: IMAGE_NOT_FOUND | IMAGE_READ_FAILED | ANALYSIS_FAILED | INVALID_REQUEST, message, roomId}
+            Client->>Client: AIErrorCode.fromPythonCode(...) -> ANALYSIS_IMAGE_NOT_FOUND /<br/>ANALYSIS_IMAGE_READ_FAILED / ANALYSIS_FAILED (FR-15)
+            Client-->>Orch: throw AIException(code, message)
+            Orch->>Pers: markFailed(roomId)
+            activate Pers
+            Pers->>Repo: save (status=FAILED, analysis_date=now;<br/>dimensions/main_color remain NULL)
+            Repo->>DB: UPDATE spaces SET status='FAILED', analysis_date=? WHERE room_id=?
+            deactivate Pers
+            Orch-->>Advice: rethrow AIException
+            Advice-->>Ctrl: 422 {errorCode, message, correlationId}
+            Ctrl-->>Ops: 422 failure body
+
+        else Transport failure - connect/read timeout or 5xx (FR-15 / AC-19)
+            Py--xClient: ResourceAccessException / ConnectException / unparseable 5xx
+            Client-->>Orch: throw AIException(AI_SERVICE_UNAVAILABLE)
+            Note over Orch,Pers: NO DB write. Row stays PENDING_ANALYSIS<br/>so poller retries next tick (AC-19 / FR-15).
+            Orch-->>Advice: rethrow AIException (isTransport=true)
+            Advice-->>Ctrl: 502 {errorCode:"AI_SERVICE_UNAVAILABLE", correlationId}
+            Ctrl-->>Ops: 502 failure body
+            Note over Poller,Client: On next @Scheduled tick the poller picks the same row again.
+        end
+    end
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% FR-3  ... POST /analyze/space request/response contract ......... Py arrows
+%% FR-5  ... DimensionsEstimator placeholder (deterministic) ....... Dims participant
+%% FR-6  ... ColorExtractor cv2.kmeans (REAL) ...................... Color participant
+%% FR-8  ... async handler + asyncio.to_thread ..................... par inside Py
+%% FR-9  ... aggregate confidence = (dim_conf + color_conf)/2 ...... Py aggregate step
+%% FR-10 ... /analyze/style placeholder (not registered) ........... Task 4 placeholder note
+%% FR-11 ... com.authenticself.ai.* classes ........................ all Spring participants
+%% FR-12 ... orchestrator flow (load / HTTP / persist) ............. Orch / Pers / Client wiring
+%% FR-13 ... POST /internal/v1/spaces/{roomId}/analyze ............. Ctrl entry (path a)
+%% FR-14 ... @Scheduled poller, findTop10... ....................... Poller entry (path b)
+%% FR-15 ... error-code mapping table .............................. alt branches under Python call
+%% FR-17 ... parallel-call readiness (String,String)->DTO .......... Client signature note
+%% FR-18 ... logging points ........................................ each alt arm has log lines in code
+%%
+%% AC-9  ... path-escape hardening -> IMAGE_NOT_FOUND .............. Py AI_PHOTO_ROOT check
+%% AC-10 ... async def + asyncio.to_thread ......................... par inside Py
+%% AC-12 ... cv2.kmeans( in color.py ............................... Color step
+%% AC-16 ... happy-path DB update .................................. markAnalyzed UPDATE
+%% AC-17 ... short-circuit on non-PENDING .......................... alt "status != PENDING_ANALYSIS"
+%% AC-18 ... analyzer failure -> status=FAILED ..................... alt "Python 422 - analyzer error"
+%% AC-19 ... transport failure -> status stays PENDING ............. alt "Transport failure"
+%% AC-20 ... SpaceNotFound -> 404, Python NOT called ............... alt "roomId has no row"
+%% AC-22 ... poller @ConditionalOnProperty(app.ai.poller.enabled) .. Poller participant annotation
+%% AC-24 ... callSpaceAnalysis(String,String)->DTO ................. Orch->Client arrow

@@ -1,0 +1,157 @@
+%% AuthenticSelf - AR-furniture-placement: PRD section 8-style sequence diagrams
+%% Five flows on one canvas, separated by rect/Note blocks:
+%%   (A) Entry + scene load        - FR-1 / FR-2 / FR-5 / FR-11 / AC-7 / AC-17 / AC-20 / AC-21 / AC-44
+%%   (B) Placement + wishlist add  - FR-7 / FR-9 / AC-22..AC-24 / AC-28 / AC-30 / AC-31
+%%   (C) Cancelled branch          - FR-8 / AC-25
+%%   (D) Error branches (4 codes)  - FR-6 / AC-26 / AC-27 / AC-32
+%%   (E) Teardown on unmount       - FR-10 / AC-29
+%%
+%% IMPORTANT: This task picked Option C per D-1 - <model-viewer> hosted
+%% inside react-native-webview, NOT Unity AR Foundation and NOT three.js.
+%% The "native AR overlay" rendered when the user taps <model-viewer>'s
+%% built-in AR icon (ARCore scene-viewer on Android / ARKit QuickLook on
+%% iOS / WebXR on desktop) lives OUTSIDE the WebView's DOM in a native
+%% platform surface - the HTML scene receives no events from it until
+%% the user returns and taps the HTML overlay's "배치 완료" button.
+%%
+%% Sources of truth:
+%%   src/mobile/App.tsx                                      (FR-2 / AC-8 / AC-18 / AC-40)
+%%   src/mobile/src/screens/RecommendationScreen.tsx         (FR-1 / AC-7 / AC-34..AC-36)
+%%   src/mobile/src/screens/ARPlacementScreen.tsx            (FR-4..FR-10 / AC-17..AC-32 / AC-39)
+%%   src/mobile/src/ar/ARWebView.tsx                         (D-7 - testable forwardRef wrapper)
+%%   src/mobile/src/ar/bridge.ts                             (FR-3 / AC-9 / AC-19 / AC-43 / AC-30)
+%%   src/mobile/assets/ar/placement.html                     (FR-11 / AC-10..AC-16 / AC-42 / AC-44)
+%%   src/mobile/src/api/wishlist.ts                          (reused from UC-02 - NOT modified)
+%%
+%% PRD refs:
+%%   section 4 (Unity AR Foundation - downgraded to Option C per D-1, flagged in README)
+%%   section 6 UC-01 "미리보기" aspiration (this task implements the preview surface)
+%%   section 8 sequence template (user -> frontend -> backend - here the "backend" is the scene DOM)
+
+sequenceDiagram
+    autonumber
+    actor User as User
+    participant Rec as RecommendationScreen (RN)<br/>ItemCard.btn-ar-{fid}<br/>FR-1 / AC-7 / AC-34..AC-36
+    participant Nav as RN Navigator<br/>RootStackParamList.ARPlacement<br/>FR-2 / AC-8 / AC-18 / AC-40
+    participant Scr as ARPlacementScreen (RN)<br/>status: loading|live|placed|cancelled|error<br/>FR-5..FR-10 / AC-17..AC-32
+    participant Wv as ARWebView.tsx<br/>forwardRef wrapper<br/>onMessage + inject(raw)<br/>D-7
+    participant Br as bridge.ts<br/>encodeInbound / decodeOutbound<br/>AR_BRIDGE_VERSION=1<br/>FR-3 / AC-9 / AC-19 / AC-43
+    participant Html as placement.html<br/>model-viewer @3.5.0 CDN<br/>window.__authenticSelfBridgeLoad<br/>FR-11 / AC-10..AC-16 / AC-44
+    participant NativeAR as Native AR overlay<br/>(ARCore scene-viewer / ARKit QuickLook / WebXR)<br/>OUTSIDE WebView DOM
+    participant Wl as api/wishlist.ts<br/>addToWishlist (UC-02 - REUSED, NOT MODIFIED)
+
+    Note over User,Wl: Precondition - UC-01 recommendations rendered; item is a RecommendationItem from nav params.
+
+    %% ==========================================================
+    %% (A) Entry + scene load  -  FR-1 / FR-2 / FR-5 / FR-11
+    %% ==========================================================
+    rect rgba(204,229,255,0.30)
+    Note over Rec,Html: (A) Entry + scene load - FR-1 / FR-5 / AC-7 / AC-21 / AC-44
+    User->>Rec: tap [AR로 배치] (testID=btn-ar-{furnitureId})
+    Rec->>Nav: navigation.navigate('ARPlacement', { roomId, item })
+    Nav->>Scr: mount with route.params = { roomId, item }
+    Scr->>Scr: useState status='loading', errorCode=null
+    Scr->>Scr: useMemo loadPayload = encodeInbound({<br/>bridgeVersion:1, event:'load',<br/>furnitureId, modelUrl=asset:///ar/models/{type}.glb,<br/>roomDimensions=DEFAULT_DIMENSIONS_BY_TYPE[type],<br/>colorHex=null })  (AC-20)
+    Scr->>Wv: render ARWebView sourceUri='asset:///ar/placement.html'<br/>testID='ar-webview' (AC-21)
+    Wv->>Html: WebView loads bundled HTML asset
+    Html->>Html: fetch model-viewer.min.js @ 3.5.0 CDN (AC-12)<br/>install window.__authenticSelfBridgeLoad (AC-44)<br/>btnPlace.disabled=true
+    Scr->>Scr: useEffect setStatus('live')
+    Scr->>Wv: webviewRef.inject(loadPayload)
+    Wv->>Html: injectJavaScript → window.__authenticSelfBridgeLoad(JSON)
+    Html->>Br: bridgeVersion check (must be 1)
+    Html->>Html: viewer.setAttribute('src', modelUrl)<br/>setTimeout 0 → probe viewer.canActivateAR
+    Html-->>Html: model-viewer 'load' event → btnPlace.disabled=false
+    end
+
+    %% ==========================================================
+    %% (B) Placement + wishlist add  -  FR-7 / FR-9
+    %% ==========================================================
+    rect rgba(230,245,220,0.30)
+    Note over User,Wl: (B) Placement + wishlist add - FR-7 / FR-9 / AC-22..AC-24 / AC-28 / AC-30 / AC-31
+    opt user taps model-viewer AR icon (supported device)
+        User->>Html: tap built-in [AR 보기] icon
+        Html->>NativeAR: dispatch AR via ar-modes="webxr scene-viewer quick-look"
+        Note over NativeAR: Native AR overlay renders OUTSIDE the WebView DOM.<br/>HTML scene receives NO events from placement gestures;<br/>user returns to WebView by closing the overlay.
+        NativeAR-->>Html: ar-status event (session-started / not-presenting)
+    end
+    User->>Html: tap [배치 완료] (HTML overlay, #btn-place)
+    Html->>Wv: window.ReactNativeWebView.postMessage(<br/>JSON.stringify({bridgeVersion:1, event:'placed',<br/>pose:{x:0,y:0,z:0,yaw:0}}))  (AC-16 / v1 pose static per FR-11)
+    Wv->>Br: decodeOutbound(raw)
+    Br-->>Wv: OutboundARPlacedMessage
+    Wv->>Scr: props.onMessage(msg)
+    Scr->>Scr: handlePlaced → setStatus('placed')
+    Scr->>Br: emitArFurniturePlaced(roomId, item.furnitureId, pose)  (AC-30 - exactly once)
+    Scr->>User: Alert.alert('배치 완료',<br/>'위시리스트에 추가하시겠습니까?',<br/>[위시리스트에 추가 | 닫기])  (AC-22 / AC-23)
+    alt User taps [위시리스트에 추가]
+        Scr->>Wl: addToWishlist({baseUrl, userId,<br/>furnitureId, category:item.type, price:item.price})  (AC-24)
+        Wl-->>Scr: { alreadyExists, status }
+        alt fresh add
+            Scr->>User: toast '위시리스트에 담았어요.' (WISHLIST_TOAST_COPY.SUCCESS_NEW)
+        else alreadyExists && status=Active
+            Scr->>User: toast '이미 위시리스트에 있어요.' (SUCCESS_EXISTS_ACTIVE)
+        else alreadyExists && status=Purchased
+            Scr->>User: toast '이미 구매 완료로 표시된 항목이에요.' (SUCCESS_EXISTS_PURCHASED)
+        else ApiError FURNITURE_NOT_FOUND | USER_NOT_FOUND
+            Scr->>User: toast '위시리스트에 추가하지 못했어요.' (FAIL_API)
+        else network / other
+            Scr->>User: toast '네트워크 오류로 추가하지 못했어요.' (FAIL_NETWORK)
+        end
+        Scr->>Nav: navigation.goBack()  (AC-28)
+    else User taps [닫기]
+        Note over Scr: No wishlist call; dismiss is style='cancel'.
+        Scr->>Nav: navigation.goBack()  (AC-28)
+    end
+    end
+
+    %% ==========================================================
+    %% (C) Cancelled branch  -  FR-8
+    %% ==========================================================
+    rect rgba(255,236,204,0.30)
+    Note over User,Nav: (C) Cancelled branch - FR-8 / AC-25
+    User->>Html: tap [취소] (HTML overlay, #btn-cancel)
+    Html->>Wv: postMessage({bridgeVersion:1, event:'cancelled'})
+    Wv->>Br: decodeOutbound
+    Br-->>Wv: OutboundARCancelledMessage
+    Wv->>Scr: onMessage
+    Scr->>Scr: handleCancelled → setStatus('cancelled')
+    Scr->>Nav: navigation.goBack()  (AC-25 - no Alert, no addToWishlist)
+    end
+
+    %% ==========================================================
+    %% (D) Error branches  -  FR-6
+    %% ==========================================================
+    rect rgba(253,218,218,0.30)
+    Note over Html,User: (D) Error branches - FR-6 / AC-26 / AC-27 / AC-32<br/>Four codes: AR_NOT_SUPPORTED, AR_CAMERA_DENIED,<br/>AR_MODEL_LOAD_FAILED, AR_SESSION_ERROR
+    alt capability probe - viewer.canActivateAR === false
+        Html->>Wv: postMessage({event:'error', errorCode:'AR_NOT_SUPPORTED'})
+    else camera permission DOMException
+        Html->>Wv: window.error /NotAllowedError|camera|permission/ →<br/>postMessage({event:'error', errorCode:'AR_CAMERA_DENIED'})
+    else model-viewer 'error' event (fetch/parse fail)
+        Html->>Wv: postMessage({event:'error', errorCode:'AR_MODEL_LOAD_FAILED'})
+    else ar-status=failed or scene init throw
+        Html->>Wv: postMessage({event:'error', errorCode:'AR_SESSION_ERROR'})
+    else RN-side decodeOutbound throws (bridgeVersion drift)
+        Note over Wv: ARWebView.onDecodeError routes to handleError('AR_SESSION_ERROR') - FR-3 contract-drift guard
+    end
+    Wv->>Br: decodeOutbound
+    Br-->>Wv: OutboundARErrorMessage {errorCode}
+    Wv->>Scr: onMessage → handleError(code)
+    Scr->>Scr: setErrorCode(code); setStatus('error')<br/>→ render branch switches (inlined fallback, §13 deviation)
+    Note over Scr: ar-webview testID REMOVED (AC-27).<br/>ar-fallback testID rendered with AR_ERROR_COPY[code] +<br/>[btn-ar-back | '돌아가기'] (AC-26 / AC-39)
+    User->>Scr: tap [돌아가기] (testID=btn-ar-back)
+    Scr->>Nav: navigation.goBack()  (AC-32)
+    end
+
+    %% ==========================================================
+    %% (E) Teardown on unmount  -  FR-10
+    %% ==========================================================
+    rect rgba(230,230,230,0.40)
+    Note over Scr,Html: (E) Teardown on unmount - FR-10 / AC-29
+    Scr->>Scr: cleanup useEffect fires
+    Scr->>Br: encodeInbound({bridgeVersion:1, event:'unload'})
+    Scr->>Wv: webviewRef.current?.inject(unloadJson)
+    Wv->>Html: injectJavaScript → __authenticSelfBridgeLoad({event:'unload'})
+    Html->>Html: viewer.removeAttribute('src'); btnPlace.disabled=true
+    Scr->>Scr: webviewRef.current = null
+    Note over Scr: jest.getTimerCount() === 0 (AC-29).<br/>No setTimeout / setInterval on the RN side.
+    end

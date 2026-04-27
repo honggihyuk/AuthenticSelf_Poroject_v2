@@ -1,0 +1,212 @@
+%% AuthenticSelf - UC-01-recommendation: PRD section 8 sequence diagram
+%% Closes PRD section 6 UC-01 steps 4-5 ("교차 검증 & 추천").
+%%
+%% Shows end-to-end flow:
+%%   (1) RN RecommendationScreen mount -> getRecommendations() fetch
+%%   (2) Spring SpaceController.getRecommendations()
+%%       -> RecommendationOrchestrator.recommend(roomId, userId, topN)
+%%       -> cache check, catalog load, dimension parse
+%%       -> POST /recommend/furniture via aiExecutor
+%%   (3) Python FastAPI /recommend/furniture (async handler)
+%%       -> resolve_style + rank (pure deterministic scorer)
+%%   (4) Response rendered with four Korean section headers
+%%   (5) Branches: cache HIT, NO_FIT_ANY_CATEGORY warning, 502 transport failure
+%%
+%% Source of truth:
+%%   src/mobile/src/screens/RecommendationScreen.tsx
+%%   src/mobile/src/api/spaces.ts  (getRecommendations + analytics stub)
+%%   src/backend/src/main/java/com/authenticself/space/SpaceController.java
+%%   src/backend/src/main/java/com/authenticself/ai/RecommendationOrchestrator.java
+%%   src/backend/src/main/java/com/authenticself/ai/RecommendationClient.java
+%%   src/backend/src/main/java/com/authenticself/ai/AiExecutorConfig.java  (aiExecutor bean)
+%%   src/backend/src/main/java/com/authenticself/domain/Furniture.java
+%%   src/ai/app/routes/recommend.py
+%%   src/ai/app/analyzers/recommender.py
+%%   src/ai/app/schemas_reco.py
+%%
+%% PRD refs:
+%%   section 6 UC-01 step 4 (cross-validation)
+%%   section 6 UC-01 step 5 (desk / bed / chair / lighting categories)
+%%   section 8 sequence template (user -> frontend -> backend -> AI -> DB)
+%%   section 9 system architecture (Python AI service is internal to Spring)
+
+sequenceDiagram
+    autonumber
+    actor User as User
+    participant Screen as RecommendationScreen (RN)<br/>FR-23 / AC-44..AC-50
+    participant Api as api/spaces.ts<br/>getRecommendations()<br/>FR-25 / AC-44
+    participant Ctrl as SpaceController<br/>GET /api/v1/spaces/{roomId}/recommendations<br/>FR-19 / AC-28..AC-37
+    participant Orch as RecommendationOrchestrator<br/>@Service<br/>FR-13 / FR-14 / FR-18
+    participant Cache as ConcurrentHashMap<br/>CacheKey(roomId, preferredStyle)<br/>TTL 600s / cap 1024<br/>FR-14
+    participant SpRepo as SpaceRepository<br/>(Task 3 / 4)
+    participant FRepo as FurnitureRepository<br/>findAll() on 28-row catalog<br/>FR-17 / AC-42
+    participant Exec as aiExecutor<br/>ThreadPoolTaskExecutor<br/>core=2 / max=8 / q=64<br/>FR-11 (reused)
+    participant RClient as RecommendationClient<br/>RestClient<br/>connect=2s / read=15s<br/>FR-13 / AC-27
+    participant Py as FastAPI :8001<br/>POST /recommend/furniture<br/>async def (FR-11 / AC-22)
+    participant Scorer as recommender.py<br/>rank() + score_item()<br/>FR-5..FR-10 / AC-5..AC-15
+    participant DB as MySQL 8<br/>spaces (V3) + furniture (V4/V5)
+
+    Note over User,Screen: Precondition - Task 4 PUT /preferred-style succeeded<br/>navigation.replace('Recommendation', { roomId }) fired.<br/>spaces row status=ANALYZED, preferred_style NOT NULL.
+
+    %% ==========================================================
+    %% (A) RN screen mount -> fetch
+    %% ==========================================================
+    rect rgba(204,229,255,0.30)
+    Note over Screen,Api: (A) Screen mount / useEffect(fetchOnce) - FR-23 / AC-44 / AC-50
+    User->>Screen: navigation resolves -> component mounts
+    Screen->>Screen: setLoading(true); render spinner<br/>"추천을 준비하고 있어요..." (AC-50)
+    Screen->>Api: getRecommendations({baseUrl, userId, roomId, topNPerCategory: 3})
+    Api->>Ctrl: fetch GET /api/v1/spaces/{roomId}/recommendations?topNPerCategory=3<br/>header X-User-Id
+    end
+
+    %% ==========================================================
+    %% (B) Spring orchestration
+    %% ==========================================================
+    rect rgba(212,237,218,0.30)
+    Note over Ctrl,Orch: (B) Controller guard rails + orchestrator entry - FR-19
+    Ctrl->>Ctrl: requireUserId(userId) -> else MISSING_USER_HEADER 400
+    Ctrl->>Ctrl: topN in [1,10] -> else INVALID_TOP_N 400 (AC-35)
+    Ctrl->>Orch: recommend(roomId, userId, topN)
+
+    Orch->>SpRepo: findById(roomId)
+    SpRepo->>DB: SELECT * FROM spaces WHERE room_id=?
+    DB-->>SpRepo: Space row
+    SpRepo-->>Orch: Optional~Space~
+
+    alt space missing (AC-34)
+        Orch-->>Ctrl: throw SpaceException(SPACE_NOT_FOUND)
+        Ctrl-->>Api: 404 {errorCode, message, correlationId}
+    else userId != space.user_id (AC-33)
+        Orch-->>Ctrl: throw SpaceException(SPACE_ACCESS_DENIED)
+        Ctrl-->>Api: 403 {errorCode, message, correlationId}
+    else status != ANALYZED (AC-31)
+        Orch-->>Ctrl: throw SpaceException(ANALYSIS_NOT_READY)
+        Ctrl-->>Api: 409 {errorCode, message, correlationId}
+    else preferredStyle == null (AC-32)
+        Orch-->>Ctrl: throw SpaceException(PREFERRED_STYLE_NOT_SET)
+        Ctrl-->>Api: 409 {errorCode, message, correlationId}
+    else guards pass
+        Orch->>Cache: get(CacheKey(roomId, preferredStyle))
+        alt cache HIT (AC-29)
+            Cache-->>Orch: CachedEntry (unexpired)
+            Orch-->>Ctrl: OrchestratorResult(resp, preferredStyle, cacheHit=true)
+            Ctrl-->>Api: 200 RecommendationsApiResponse<br/>cacheHit=true, generatedAt unchanged
+        else cache MISS (AC-28)
+            Cache-->>Orch: null
+            Orch->>FRepo: findAll() on furniture table
+            FRepo->>DB: SELECT * FROM furniture (28 seeded rows)
+            DB-->>FRepo: List~Furniture~
+            FRepo-->>Orch: 28-row catalog
+            Orch->>Orch: parseDimensions("4.0x4.0x2.4m")<br/>-> [widthM, lengthM, heightM]<br/>(step 7 / FR-18)
+            Orch->>Orch: buildRequest(..., detectedObjects = Collections.emptyList())<br/>(step 8 / AC-38)
+
+            Note over Orch,Exec: (C) PARALLEL submit - actual Python call runs on aiExecutor thread
+            Orch->>Exec: CompletableFuture.supplyAsync(() -> client.callRecommend(req), aiExecutor)
+            Exec->>RClient: callRecommend(RecommendationRequest)
+            RClient->>Py: POST /recommend/furniture<br/>{roomId, userId, space{...,detectedObjects:[]}, preferredStyle, catalog[28], topNPerCategory}
+    end
+    end
+    end
+
+    %% ==========================================================
+    %% (D) Python scorer
+    %% ==========================================================
+    rect rgba(255,243,205,0.35)
+    Note over Py,Scorer: (D) Python deterministic scorer - FR-11 / FR-5..FR-10
+    activate Py
+    Py->>Py: Pydantic validate RecommendRequest<br/>catalog != [] else 422 CATALOG_EMPTY (AC-20)
+    Py->>Scorer: resolve_style(preferredStyle, detectedStyle)<br/>FR-4 / AC-16..AC-18
+    Scorer-->>Py: resolved (never CURRENT)
+    Note over Py: len(catalog) <= 500 -> inline;<br/>else await asyncio.to_thread(rank, ...) (FR-11)
+    Py->>Scorer: rank(catalog, resolved_style, room, mainColor, detectedObjects=[], topN)
+    loop per catalog item (28 rows)
+        Scorer->>Scorer: score_size_fit(item, room)<br/>hard-fit: long_dim <= min(w,l)*100-30<br/>and heightCm <= h*100-20<br/>-> drop item if fail (FR-5 / AC-5 / AC-40)
+        Scorer->>Scorer: score_style_match(resolved, styleTags)<br/>1.00 exact / 0.50 compat / 0.10 other<br/>(FR-7 / AC-7..AC-9)
+        Scorer->>Scorer: score_color_harmony(roomHex, itemHex)<br/>HSL hue-delta bucket + neutral bump<br/>(FR-6 / AC-10 / AC-11)
+        Scorer->>Scorer: score_object_conflict(item, detected=[])<br/>lighting exempt (FR-8 / AC-12 / AC-13)
+        Scorer->>Scorer: fitScore = round(0.35*size + 0.30*style + 0.20*color + 0.15*conflict, 2)<br/>(FR-9 / AC-15)
+        Scorer->>Scorer: compose_rationale(...) Korean segments, truncate 120
+    end
+    Scorer->>Scorer: buckets sort: (-fitScore, price, furnitureId) (FR-9 / AC-14 / AC-41)<br/>truncate to topNPerCategory
+    Scorer-->>Py: {desk:[...], bed:[...], chair:[...], lighting:[...]}
+    Py->>Py: all four empty? -> warning = "NO_FIT_ANY_CATEGORY" (AC-19)<br/>else warning = null
+    Py-->>RClient: 200 RecommendResponse{roomId,status:OK,resolvedStyle,generatedAt,recommendations,warning,processingMs}
+    deactivate Py
+    end
+
+    %% ==========================================================
+    %% (E) Response propagation
+    %% ==========================================================
+    rect rgba(228,212,245,0.35)
+    Note over RClient,Screen: (E) Response propagation + cache write - FR-14 / FR-19
+    RClient-->>Exec: RecommendationResponse (deserialized by Jackson)
+    Exec-->>Orch: future.join() -> response
+    Orch->>Cache: put(CacheKey, CachedEntry(response, now + ttlMs))
+    Orch-->>Ctrl: OrchestratorResult(response, preferredStyle.name(), cacheHit=false)
+    Ctrl->>Ctrl: RecommendationsApiResponse.from(inner, preferredStyle, cacheHit)<br/>adds cacheHit + preferredStyle on the wire (FR-19)
+    Ctrl-->>Api: 200 {roomId,status:OK,resolvedStyle,preferredStyle,generatedAt,cacheHit:false,recommendations{...},warning,processingMs}
+    Api->>Api: assertRecommendationResponse(body) - runtime shape check<br/>four keys present or throw
+    Api-->>Screen: RecommendationResponse
+    Screen->>Screen: setLoading(false); setResponse(resp)
+    Screen->>User: render header "모던 스타일 추천"<br/>+ sections 책상 / 침대 / 의자 / 조명 (AC-44)<br/>+ ItemCards with name / price / 매칭 N% / rationale (AC-45)
+    end
+
+    %% ==========================================================
+    %% (F) NO_FIT_ANY_CATEGORY fork (warning path)
+    %% ==========================================================
+    rect rgba(255,226,204,0.40)
+    Note over Screen,Py: (F) NO_FIT_ANY_CATEGORY - still HTTP 200, UI pivots to full-empty copy (AC-47)
+    alt warning == "NO_FIT_ANY_CATEGORY" AND all four arrays empty
+        Screen->>User: full-screen "이 공간에 딱 맞는 가구를 찾지 못했습니다..."<br/>+ [스타일 다시 선택] button -> navigation.goBack()
+    end
+    end
+
+    %% ==========================================================
+    %% (G) 502 transport failure path
+    %% ==========================================================
+    rect rgba(248,215,218,0.45)
+    Note over Screen,Py: (G) 502 AI_SERVICE_UNAVAILABLE (AC-36) - cache NOT populated
+    RClient--xPy: ConnectException / SocketTimeoutException
+    RClient-->>Exec: throw AIException(AI_SERVICE_UNAVAILABLE)
+    Exec-->>Orch: CompletionException(cause=AIException)
+    Orch->>Orch: unwrap -> rethrow AIException (NO cache.put)
+    Orch-->>Ctrl: AIException bubbles through
+    Ctrl-->>Api: 502 {errorCode:"AI_SERVICE_UNAVAILABLE", message, correlationId}
+    Api-->>Screen: throw ApiError(502, body)
+    Screen->>Screen: mapErrorToCopy -> "추천 서비스에 연결할 수 없습니다..."<br/>+ [다시 시도] button
+    end
+
+    %% ==========================================================
+    %% (H) Wishlist stub (UC-02 will replace)
+    %% ==========================================================
+    rect rgba(222,226,230,0.30)
+    Note over Screen,User: (H) "위시리스트에 추가" stub (AC-48) - no /wishlist network call
+    User->>Screen: tap [위시리스트에 추가] on ItemCard
+    Screen->>Api: emitWishlistAddClicked(roomId, furnitureId)
+    Api->>Api: analyticsSink({type:'wishlist_add_clicked', payload})
+    Screen->>User: Toast "위시리스트 기능은 준비 중입니다."
+    end
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% RN getRecommendations + shape narrowing ........... FR-25 / AC-44
+%% RecommendationScreen loading / error / no-fit .... FR-23 / AC-44..AC-50
+%% Wishlist stub analytics event .................... FR-23 / AC-48
+%% Spring GET /recommendations endpoint ............. FR-19 / AC-28..AC-37
+%% INVALID_TOP_N 400 ................................ AC-35
+%% MISSING_USER_HEADER 401 .......................... FR-19
+%% SPACE_NOT_FOUND / ACCESS_DENIED / 409 guards ..... AC-31..AC-34
+%% Orchestrator flow (load + authorize + cache) ..... FR-13 / FR-18 / AC-28
+%% Cache HIT/MISS + TTL ............................. FR-14 / AC-29
+%% Cache invalidation on preferred-style PUT ........ FR-20 / AC-30 (see sequence-invalidate.mmd note below)
+%% Detected objects always [] ....................... FR-18 step 8 / AC-38
+%% RecommendationClient (one-param method) .......... FR-13 / AC-27
+%% Python route async def + to_thread cutoff 500 .... FR-11 / AC-22
+%% CATALOG_EMPTY 422 ................................ FR-12 / AC-20
+%% Deterministic scorer (fixed weights + tie-break) . FR-5..FR-10 / AC-3 / AC-14 / AC-15
+%% NO_FIT_ANY_CATEGORY warning (still 200) .......... FR-12 / AC-19 / AC-47
+%% 502 AI_SERVICE_UNAVAILABLE (no cache write) ...... AC-36
+%% PRD section 8 "par [AI 병렬 처리]" ................. inline scorer (single call)
+%% PRD section 6 UC-01 step 4 "교차 검증" ............. block (D)
+%% PRD section 6 UC-01 step 5 "가구 추천 (4 categories)"  block (E)

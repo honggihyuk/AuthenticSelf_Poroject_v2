@@ -1,0 +1,2 @@
+# Empty marker — parent `var/object-storage` is the dev object-storage root
+# (see application.yml / app.storage.local.root). Contents are gitignored.

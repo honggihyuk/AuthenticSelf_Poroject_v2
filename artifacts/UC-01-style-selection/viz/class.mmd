@@ -1,0 +1,447 @@
+%% AuthenticSelf - UC-01-style-selection: class diagram (UPDATED from Task 3)
+%%
+%% Delta from artifacts/UC-01-space-analysis/viz/class.mmd:
+%%   PYTHON
+%%     - StyleClassifier is NOW ACTIVE (wired into POST /analyze/style)
+%%     - new route module app/routes/style.py
+%%     - new Pydantic models StyleAnalyzeRequest / StyleAnalysisResponse
+%%     - new factory default_style_classifier (FastAPI Depends)
+%%     - new dataclass StyleAnalysisResult (in analyzers/style.py)
+%%   SPRING
+%%     - new StyleAnalysisClient (sibling of SpaceAnalysisClient)
+%%     - new AiExecutorConfig (aiExecutor ThreadPoolTaskExecutor bean)
+%%     - new StyleConfidenceCache (in-memory, TTL 15m)
+%%     - new SpaceController (public /api/v1/spaces/*)
+%%     - new Style + PreferredStyle enums
+%%     - new SpaceException / SpaceExceptionAdvice / SpaceErrorCode
+%%     - new DTOs StyleAnalysisRequest/Response, SpaceResponse, SetPreferredStyleRequest
+%%     - AIOrchestrator NOW depends on BOTH SpaceAnalysisClient AND StyleAnalysisClient
+%%     - SpaceAnalysisPersistence adds markAnalyzed(..., String style), setPreferredStyle, loadForRead
+%%     - Space entity adds preferredStyle field (PreferredStyle, nullable)
+%%
+%% Source of truth:
+%%   src/ai/app/main.py, routes/style.py, schemas.py, analyzers/style.py, analyzers/__init__.py
+%%   src/backend/src/main/java/com/authenticself/ai/*.java
+%%   src/backend/src/main/java/com/authenticself/space/*.java
+%%   src/backend/src/main/java/com/authenticself/controller/dto/{SpaceResponse,SetPreferredStyleRequest,ErrorResponse}.java
+%%   src/backend/src/main/java/com/authenticself/domain/Space.java
+
+classDiagram
+    direction LR
+
+    %% ======================================================
+    %% PYTHON SIDE - src/ai/app/**
+    %% ======================================================
+
+    class FastAPIApp {
+      <<FastAPI>>
+      +title = "AuthenticSelf AI - Space Analysis"
+      +GET  /health                         Task 3 FR-2
+      +POST /analyze/space                  Task 3 FR-3
+      +POST /analyze/style                  Task 4 FR-1 / AC-1  NEW ACTIVE
+      -include_router(style_router)
+      -exception_handler RequestValidationError -> INVALID_REQUEST
+      -exception_handler AnalyzerError -> 422 envelope
+      -exception_handler Exception -> INTERNAL_ERROR 500
+    }
+
+    class StyleRouter {
+      <<APIRouter>>
+      +async analyze_style(request, body, classifier) StyleAnalysisResponse
+      %% Task 4 FR-1 / FR-6 / FR-7 / AC-6
+      %% asyncio.to_thread(classifier.analyze, path)
+      %% AI_PHOTO_ROOT allow-list on resolved path
+    }
+
+    class StyleAnalyzeRequest {
+      <<PydanticModel>>
+      +roomId: str ^[A-Za-z0-9_-]{1,64}$
+      +photoUrl: str ^file://.+
+      %% FR-2
+    }
+
+    class StyleAnalysisResponse {
+      <<PydanticModel>>
+      +roomId: str
+      +status: Literal["OK"]
+      +style: StyleLabel
+      +confidence: float [0,1]
+      +scores: Dict[StyleLabel, float]
+      +processingMs: int
+      %% FR-2 / AC-2
+    }
+
+    class StyleLabel {
+      <<Literal>>
+      MODERN | SIMPLE | CLASSIC | SCANDINAVIAN | INDUSTRIAL
+      %% FR-2 / AC-4 (no CURRENT)
+    }
+
+    class StyleClassifier {
+      <<Analyzer / ACTIVE PLACEHOLDER>>
+      +LABELS : Tuple[str,...]
+      +analyze(image_path: Path) StyleAnalysisResult
+      %% FR-3 / FR-4 / AC-8
+      %% sha256(bytes)[:20] -> five 4-char chunks -> normalise -> argmax
+      %% TODO(ml) ResNet / CLIP / transformer
+    }
+
+    class StyleAnalysisResult {
+      <<dataclass frozen>>
+      +style: str
+      +confidence: float
+      +scores: Dict[str,float]
+      %% FR-4
+    }
+
+    class default_style_classifier {
+      <<FastAPI Depends>>
+      +() StyleClassifier
+      %% FR-3 - DI factory, fresh instance per request
+    }
+
+    class ColorExtractor {
+      <<Analyzer / REAL - unchanged>>
+    }
+    class DimensionsEstimator {
+      <<Analyzer / placeholder - unchanged>>
+    }
+    class AnalyzerBundle {
+      +dimensions: DimensionsEstimator
+      +color: ColorExtractor
+      +style: StyleClassifier
+    }
+    class default_analyzers {
+      <<FastAPI Depends>>
+      +() AnalyzerBundle
+    }
+
+    class SpaceAnalyzeRequest {
+      <<PydanticModel - unchanged>>
+    }
+    class SpaceAnalysisResponse {
+      <<PydanticModel - unchanged>>
+    }
+    class Dimensions {
+      <<PydanticModel - unchanged>>
+    }
+    class ErrorResponse {
+      <<PydanticModel>>
+      +errorCode: str
+      +message: str
+      +roomId: Optional[str]
+    }
+
+    class AnalyzerError {
+      <<Exception>>
+    }
+    class ImageNotFoundError
+    class ImageReadError
+    class AnalysisError
+
+    AnalyzerError <|-- ImageNotFoundError
+    AnalyzerError <|-- ImageReadError
+    AnalyzerError <|-- AnalysisError
+
+    FastAPIApp ..> StyleRouter : include_router
+    StyleRouter ..> StyleAnalyzeRequest : validates
+    StyleRouter ..> StyleAnalysisResponse : returns
+    StyleRouter ..> StyleClassifier : Depends(default_style_classifier)
+    StyleRouter ..> AnalyzerError : raises
+    default_style_classifier ..> StyleClassifier : creates
+    StyleClassifier ..> StyleAnalysisResult : returns
+    StyleAnalysisResponse ..> StyleLabel : field type
+    AnalyzerBundle o-- StyleClassifier
+    AnalyzerBundle o-- ColorExtractor
+    AnalyzerBundle o-- DimensionsEstimator
+    default_analyzers ..> AnalyzerBundle : creates
+    FastAPIApp ..> SpaceAnalyzeRequest : validates
+    FastAPIApp ..> SpaceAnalysisResponse : returns
+    FastAPIApp ..> Dimensions : composes
+    FastAPIApp ..> AnalyzerBundle : Depends
+
+    %% ======================================================
+    %% SPRING SIDE - com.authenticself.**
+    %% ======================================================
+
+    class SpaceController {
+      <<RestController - PUBLIC>>
+      +GET  /api/v1/spaces/{roomId}                    FR-14 / AC-19..AC-21
+      +PUT  /api/v1/spaces/{roomId}/preferred-style    FR-14 / AC-22..AC-26
+      -requireUserId(userId)
+      -loadAndAuthorize(roomId, userId) Space
+      -toResponse(Space) SpaceResponse
+      %% @CrossOrigin - PUBLIC OpenAPI surface (unlike /internal/v1/*)
+    }
+
+    class AIOrchestratorController {
+      <<RestController - INTERNAL - Task 3>>
+      +POST /internal/v1/spaces/{roomId}/analyze
+    }
+
+    class AIOrchestrator {
+      <<Service - UPDATED Task 4>>
+      -persistence: SpaceAnalysisPersistence
+      -spaceClient: SpaceAnalysisClient
+      -styleClient: StyleAnalysisClient            NEW FR-8
+      -aiExecutor: Executor                         NEW FR-11
+      +analyze(roomId) SpaceAnalysisResultDTO
+      -unwrap(Throwable) AIException
+      -unwrapOrNull(Throwable) AIException
+      %% FR-11: CompletableFuture.supplyAsync x 2 + allOf().join()
+      %% FR-12: four-way partial-success branching
+    }
+
+    class StyleAnalysisClient {
+      <<Component - NEW Task 4>>
+      -restClient: RestClient
+      -baseUrl: String
+      -objectMapper: ObjectMapper
+      +callStyleAnalysis(roomId, photoUrl) StyleAnalysisResponse
+      %% FR-8 / AC-11 - (String,String) -> DTO
+      %% timeouts connect 2s / read 10s via app.ai.style.*
+    }
+
+    class SpaceAnalysisClient {
+      <<Component - Task 3>>
+      +callSpaceAnalysis(roomId, photoUrl) SpaceAnalysisResponse
+    }
+
+    class AiExecutorConfig {
+      <<Configuration - NEW Task 4>>
+      +aiExecutor(core, max, queue) Executor
+      %% FR-11 - ThreadPoolTaskExecutor
+      %% core=2 / max=8 / queue=64 / prefix ai-orchestrator-
+    }
+
+    class StyleConfidenceCache {
+      <<utility class - NEW Task 4>>
+      -CACHE: ConcurrentHashMap
+      -TTL_MS = 15 * 60000
+      +put(roomId, confidence) void$
+      +get(roomId) Double$
+      +clear() void$
+      %% FR-14 transient cache; SpaceController.toResponse reads, AIOrchestrator writes
+    }
+
+    class SpaceAnalysisPersistence {
+      <<Component - UPDATED Task 4>>
+      +loadForAnalysis(roomId) Snapshot              @Transactional readOnly REQUIRES_NEW
+      +loadForRead(roomId) Space                     @Transactional readOnly REQUIRES_NEW  NEW
+      +markAnalyzed(roomId, dims, color, style) void @Transactional REQUIRES_NEW  UPDATED (+style)
+      +markAnalyzed(roomId, dims, color) void        @Deprecated  back-compat
+      +markFailed(roomId) void                       @Transactional REQUIRES_NEW
+      +setPreferredStyle(roomId, enum) Space         @Transactional REQUIRES_NEW  NEW
+    }
+
+    class AnalysisPoller {
+      <<Scheduled - Task 3>>
+      +sweep()
+    }
+
+    class AIOrchestratorExceptionAdvice {
+      <<RestControllerAdvice - Task 3>>
+      +handleAi(AIException) ResponseEntity
+      +handleNotFound(SpaceNotFoundException) ResponseEntity
+    }
+
+    class SpaceExceptionAdvice {
+      <<RestControllerAdvice - NEW Task 4>>
+      +handleSpace(SpaceException) ResponseEntity
+      +handleMissingHeader(MissingRequestHeaderException) ResponseEntity
+      +handleUnreadable(HttpMessageNotReadableException) ResponseEntity
+      %% @Order(HIGHEST_PRECEDENCE) - basePackages com.authenticself.space
+    }
+
+    class AIErrorCode {
+      <<enum - Task 3, reused>>
+      ANALYSIS_IMAGE_NOT_FOUND 422
+      ANALYSIS_IMAGE_READ_FAILED 422
+      ANALYSIS_FAILED 422
+      AI_SERVICE_UNAVAILABLE 502
+      SPACE_NOT_FOUND 404
+    }
+
+    class SpaceErrorCode {
+      <<enum - NEW Task 4>>
+      SPACE_NOT_FOUND 404
+      SPACE_ACCESS_DENIED 403
+      MISSING_USER_HEADER 400
+      INVALID_PREFERRED_STYLE 400
+      ANALYSIS_NOT_READY 409
+    }
+
+    class AIException {
+      <<RuntimeException>>
+      +code: AIErrorCode
+      +isTransport() boolean
+    }
+    class SpaceNotFoundException {
+      <<RuntimeException - Task 3>>
+    }
+    class SpaceException {
+      <<RuntimeException - NEW Task 4>>
+      +code: SpaceErrorCode
+    }
+
+    class Style {
+      <<enum - NEW Task 4>>
+      MODERN | SIMPLE | CLASSIC | SCANDINAVIAN | INDUSTRIAL
+      +fromNullable(String) Style$
+      %% FR-8 / AC-10
+    }
+
+    class PreferredStyle {
+      <<enum - NEW Task 4>>
+      CURRENT | MODERN | SIMPLE | CLASSIC | SCANDINAVIAN | INDUSTRIAL
+      +fromNullable(String) PreferredStyle$
+      %% FR-8 / AC-10 / AC-26
+    }
+
+    class Space {
+      <<Entity - UPDATED Task 4>>
+      +roomId: String @Id
+      +userId: String
+      +photoUrl: String
+      +status: Status(PENDING_ANALYSIS|ANALYZED|FAILED)
+      +dimensions: String
+      +mainColor: String
+      +style: String
+      +preferredStyle: PreferredStyle   NEW  @Enumerated(STRING) length=32 nullable  AC-18
+      +analysisDate: LocalDateTime
+      +uploadedAt: LocalDateTime
+    }
+
+    class SpaceRepository {
+      <<Repository>>
+      +findById(roomId) Optional~Space~
+      +save(Space) Space
+      +findTop10ByStatusOrderByUploadedAtAsc(Status) List~Space~
+    }
+
+    class SpaceResponse {
+      <<DTO / record - NEW Task 4>>
+      +roomId: String
+      +status: String
+      +dimensions: String
+      +mainColor: String
+      +style: String
+      +styleConfidence: Double
+      +preferredStyle: PreferredStyle
+      +analysisDate: LocalDateTime
+      +uploadedAt: LocalDateTime
+      %% FR-14 / AC-19
+    }
+
+    class SetPreferredStyleRequest {
+      <<DTO / record - NEW Task 4>>
+      +preferredStyle: String
+      %% String not enum so Jackson doesn't 400 on unknown;
+      %% controller parses manually for AC-24 INVALID_PREFERRED_STYLE
+    }
+
+    class ErrorResponseDTO {
+      <<DTO / record>>
+      +errorCode: String
+      +message: String
+      +correlationId: String
+    }
+
+    class StyleAnalysisRequest {
+      <<DTO / record - NEW Task 4>>
+      +roomId: String
+      +photoUrl: String
+    }
+    class StyleAnalysisResponse_Spring {
+      <<DTO / record - NEW Task 4>>
+      +roomId: String
+      +status: String
+      +style: String
+      +confidence: Double
+      +scores: Map~String,Double~
+      +processingMs: Integer
+    }
+    class AiErrorResponse {
+      <<DTO / record - Task 3>>
+      +errorCode: String
+      +message: String
+      +roomId: String
+    }
+    class SpaceAnalysisResultDTO {
+      <<DTO / record - Task 3>>
+    }
+
+    %% Wiring
+    SpaceController --> SpaceAnalysisPersistence
+    SpaceController --> StyleConfidenceCache
+    SpaceController ..> SpaceResponse : returns
+    SpaceController ..> SetPreferredStyleRequest : consumes
+    SpaceController ..> PreferredStyle : parses
+    SpaceController ..> SpaceException : throws
+
+    AIOrchestrator --> SpaceAnalysisPersistence
+    AIOrchestrator --> SpaceAnalysisClient
+    AIOrchestrator --> StyleAnalysisClient
+    AIOrchestrator --> AiExecutorConfig
+    AIOrchestrator --> StyleConfidenceCache : put(roomId, conf)
+    AIOrchestrator ..> AIException : throws on space-failure
+
+    StyleAnalysisClient ..> StyleAnalysisRequest : sends
+    StyleAnalysisClient ..> StyleAnalysisResponse_Spring : receives
+    StyleAnalysisClient ..> AiErrorResponse : parses on error
+    StyleAnalysisClient ..> AIException : throws
+    StyleAnalysisClient ..> AIErrorCode : uses
+
+    SpaceAnalysisPersistence --> SpaceRepository
+    SpaceAnalysisPersistence ..> SpaceNotFoundException : throws
+    SpaceRepository --> Space : manages
+    Space --> PreferredStyle : column preferred_style
+    AIOrchestratorController --> AIOrchestrator
+    AnalysisPoller --> SpaceRepository
+    AnalysisPoller --> AIOrchestrator
+
+    SpaceExceptionAdvice ..> SpaceException : handles
+    SpaceExceptionAdvice ..> SpaceErrorCode : maps to HTTP
+    SpaceException --> SpaceErrorCode
+    AIOrchestratorExceptionAdvice ..> AIException : handles
+    AIException --> AIErrorCode
+
+    %% Cross-process wires
+    StyleAnalysisClient ..> StyleRouter : HTTP POST /analyze/style
+    SpaceAnalysisClient ..> FastAPIApp : HTTP POST /analyze/space
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% PYTHON - NEW / ACTIVE in Task 4:
+%%   StyleRouter ..................... FR-1 / FR-6 / FR-7 / AC-1 / AC-6
+%%   StyleClassifier (now ACTIVE) .... FR-3 / FR-4 / AC-8
+%%   StyleAnalyzeRequest/Response .... FR-2 / AC-2 / AC-4 / AC-5
+%%   StyleLabel (Literal) ............ FR-2 / AC-4 (no CURRENT)
+%%   default_style_classifier ........ FR-3 (DI surface)
+%%   StyleAnalysisResult dataclass ... FR-4
+%%
+%% SPRING - NEW in Task 4:
+%%   StyleAnalysisClient ............. FR-8 / AC-11
+%%   AiExecutorConfig ................ FR-11 (aiExecutor bean)
+%%   StyleConfidenceCache ............ FR-14 (transient, 15m TTL)
+%%   SpaceController ................. FR-14 / FR-15 / AC-19..AC-26
+%%   SpaceExceptionAdvice ............ FR-14 (error envelope)
+%%   SpaceErrorCode .................. FR-14 / AC-20 / AC-21 / AC-24 / AC-25
+%%   SpaceException .................. FR-14
+%%   Style enum ...................... FR-8 / AC-10
+%%   PreferredStyle enum ............. FR-8 / AC-10 / AC-26
+%%   SpaceResponse DTO ............... FR-14 / AC-19
+%%   SetPreferredStyleRequest DTO .... FR-14 / AC-22 / AC-24
+%%   StyleAnalysisRequest/Response ... FR-8
+%%   Space.preferredStyle field ...... FR-10 / AC-18
+%%   V3 migration spaces.preferred_style VARCHAR(32) NULL .. FR-9 / AC-9
+%%
+%% SPRING - UPDATED in Task 4:
+%%   AIOrchestrator .................. FR-11 / FR-12 / FR-17 / AC-12..AC-17
+%%     now depends on BOTH spaceClient AND styleClient + aiExecutor
+%%     four-way partial-success branching via allOf().join()
+%%   SpaceAnalysisPersistence ........ FR-12 / FR-14
+%%     markAnalyzed now takes nullable style
+%%     adds loadForRead + setPreferredStyle
+%%     retains @Deprecated 3-arg overload for source back-compat

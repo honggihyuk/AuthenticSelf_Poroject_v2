@@ -1,0 +1,172 @@
+%% AuthenticSelf - UC-01-style-selection: PRD section 8 sequence diagram
+%% DEFINITIVE view of the end-to-end UC-01 flow after Task 4.
+%%
+%% Shows:
+%%   (1) RN AnalyzingScreen exponential-backoff polling of GET /api/v1/spaces/{roomId}
+%%   (2) Orchestrator par-fan-out of POST /analyze/space + POST /analyze/style on aiExecutor
+%%   (3) CompletableFuture.allOf().join() -> per-future outcome inspection
+%%   (4) Partial-success matrix (four branches: both OK / style fail / space transport fail / space analyzer fail)
+%%   (5) Polling observes ANALYZED -> navigate to StyleSelectionScreen -> PUT /preferred-style
+%%
+%% Source of truth:
+%%   src/backend/src/main/java/com/authenticself/ai/AIOrchestrator.java
+%%   src/backend/src/main/java/com/authenticself/ai/StyleAnalysisClient.java
+%%   src/backend/src/main/java/com/authenticself/ai/SpaceAnalysisClient.java
+%%   src/backend/src/main/java/com/authenticself/ai/SpaceAnalysisPersistence.java
+%%   src/backend/src/main/java/com/authenticself/ai/AiExecutorConfig.java
+%%   src/backend/src/main/java/com/authenticself/ai/StyleConfidenceCache.java
+%%   src/backend/src/main/java/com/authenticself/space/SpaceController.java
+%%   src/ai/app/routes/style.py
+%%   src/ai/app/analyzers/style.py  (StyleClassifier, active)
+%%   src/mobile/src/screens/AnalyzingScreen.tsx
+%%   src/mobile/src/screens/StyleSelectionScreen.tsx
+%%   src/mobile/src/api/pollSchedule.ts
+
+sequenceDiagram
+    autonumber
+    actor User as User
+    participant Analyzing as AnalyzingScreen (RN)<br/>FR-19 / AC-31..AC-33
+    participant Style as StyleSelectionScreen (RN)<br/>FR-18 / AC-28..AC-30
+    participant SpaceCtrl as SpaceController<br/>(public /api/v1/spaces/*)<br/>FR-14 / FR-15
+    participant AICtrl as AIOrchestratorController<br/>(internal /internal/v1/*)<br/>Task 3 FR-13
+    participant Orch as AIOrchestrator<br/>FR-11 / FR-12 / FR-17
+    participant Exec as aiExecutor<br/>ThreadPoolTaskExecutor<br/>core=2 / max=8 / q=64<br/>FR-11 / AiExecutorConfig
+    participant Pers as SpaceAnalysisPersistence<br/>@Transactional(REQUIRES_NEW)
+    participant SClient as SpaceAnalysisClient<br/>RestClient (Task 3)
+    participant StClient as StyleAnalysisClient<br/>RestClient (Task 4)<br/>FR-8 / AC-11
+    participant Cache as StyleConfidenceCache<br/>(in-memory, TTL 15m)<br/>FR-14
+    participant Py as FastAPI :8001<br/>src/ai/app/main.py
+    participant DB as MySQL<br/>spaces (V3 preferred_style)
+
+    Note over User,Analyzing: Precondition - UC-01 Task 2 already POSTed /api/v1/spaces/photo<br/>returning {roomId}. Row is PENDING_ANALYSIS.
+
+    %% ==========================================================
+    %% (A) RN polling loop - FR-19 / AC-31 / AC-32 / AC-33
+    %% ==========================================================
+    rect rgba(204,229,255,0.30)
+    Note over Analyzing,SpaceCtrl: (A) Exponential-backoff polling<br/>schedule [1.0, 1.5, 2.25, 3.38, 5.06, 7.59, 10, 10, ...] cap 10s<br/>60s wall-clock budget. Cancelled on unmount / AppState != active.
+    loop until status != PENDING or 60s budget elapses
+        Analyzing->>SpaceCtrl: GET /api/v1/spaces/{roomId}<br/>header: X-User-Id
+        SpaceCtrl->>Pers: loadForRead(roomId) [readOnly tx]
+        Pers->>DB: SELECT * FROM spaces WHERE room_id=?
+        DB-->>Pers: row
+        Pers-->>SpaceCtrl: Space
+        SpaceCtrl->>Cache: get(roomId)
+        Cache-->>SpaceCtrl: styleConfidence or null
+        SpaceCtrl-->>Analyzing: 200 SpaceResponse<br/>{status, style, styleConfidence, preferredStyle:null, ...}
+        Note over Analyzing: if status == PENDING_ANALYSIS: wait delayForAttempt(n), loop
+    end
+    end
+
+    %% ==========================================================
+    %% (B) Analysis trigger - orchestrator fan-out
+    %% This happens in parallel to the polling (kicked off by the
+    %% internal controller on a different entrypoint OR by the
+    %% AnalysisPoller sweep introduced in Task 3).
+    %% ==========================================================
+    rect rgba(212,237,218,0.30)
+    Note over AICtrl,Orch: (B) Analysis trigger - FR-11 / AC-12 / AC-13<br/>invoked via POST /internal/v1/spaces/{roomId}/analyze<br/>OR AnalysisPoller @Scheduled sweep (Task 3 FR-14)
+    AICtrl->>Orch: analyze(roomId)
+    Orch->>Pers: loadForAnalysis(roomId) [readOnly REQUIRES_NEW]
+    Pers->>DB: SELECT status, photo_url FROM spaces WHERE room_id=?
+    DB-->>Pers: (status, photoUrl)
+    Pers-->>Orch: Snapshot
+    Note over Orch: short-circuit if status != PENDING_ANALYSIS (Task 3 FR-12 / AC-17)
+
+    Note over Orch,Exec: PARALLEL FAN-OUT (FR-11)<br/>BOTH supplyAsync calls fire BEFORE any .join() / .get()
+    Orch->>Exec: supplyAsync(spaceTask, aiExecutor)
+    Orch->>Exec: supplyAsync(styleTask, aiExecutor)
+
+    par Space future (left arm)
+        Exec->>SClient: callSpaceAnalysis(roomId, photoUrl)
+        SClient->>Py: POST /analyze/space {roomId, photoUrl}
+        activate Py
+        Py->>Py: asyncio.gather(to_thread(dim), to_thread(color))
+        Py-->>SClient: 200 {dimensions, mainColor, confidence, processingMs}
+        deactivate Py
+        SClient-->>Exec: SpaceAnalysisResponse
+    and Style future (right arm)  Task 4 FR-1 / AC-1 NOW ACTIVE
+        Exec->>StClient: callStyleAnalysis(roomId, photoUrl)
+        StClient->>Py: POST /analyze/style {roomId, photoUrl}
+        activate Py
+        Py->>Py: await asyncio.to_thread(StyleClassifier.analyze, path)<br/>FR-4 / FR-6 / AC-6<br/>sha256 -> 5-float vector -> argmax
+        Py-->>StClient: 200 {style, confidence, scores, processingMs}<br/>FR-2 / AC-2 / AC-4 (CURRENT never emitted)
+        deactivate Py
+        StClient-->>Exec: StyleAnalysisResponse
+    end
+
+    Orch->>Orch: CompletableFuture.allOf(sf, stf).join()<br/>swallow CompletionException - inspect per-future next
+    Note over Orch: Unwrap via CompletionException.getCause() -> AIException (FR-12)
+
+    alt Both succeed - FR-12 "both OK" / AC-14
+        Orch->>Pers: markAnalyzed(roomId, dims, mainColor, style) [REQUIRES_NEW]
+        Pers->>DB: UPDATE spaces SET status='ANALYZED', dimensions=?, main_color=?, style=?, analysis_date=NOW() WHERE room_id=?
+        Orch->>Cache: put(roomId, styleConfidence)
+        Orch-->>AICtrl: 200 SpaceAnalysisResultDTO.ofAnalyzed(...)<br/>log INFO spaceMs styleMs totalMs (FR-17)
+    else Space OK, Style failed - FR-12 "style-only failure" / AC-15 (degraded success)
+        Note over Orch: styleFuture.isCompletedExceptionally() == true
+        Orch->>Pers: markAnalyzed(roomId, dims, mainColor, null) [REQUIRES_NEW]
+        Pers->>DB: UPDATE spaces SET status='ANALYZED', dimensions=?, main_color=?, analysis_date=NOW() WHERE room_id=?<br/>(style stays NULL)
+        Orch-->>AICtrl: 200 SpaceAnalysisResultDTO.ofAnalyzed(...)<br/>log WARN ai.analyze style failed (degraded-success)
+    else Space analyzer-failed (422) - FR-12 / AC-16
+        Note over Orch: spaceFuture.get() -> AIException (non-transport)<br/>style outcome discarded even if successful
+        Orch->>Pers: markFailed(roomId) [REQUIRES_NEW]
+        Pers->>DB: UPDATE spaces SET status='FAILED', analysis_date=NOW() WHERE room_id=?
+        Orch-->>AICtrl: throw AIException(ANALYSIS_IMAGE_READ_FAILED / ...)
+        AICtrl-->>Orch: 422 {errorCode, correlationId}
+    else Space transport-failed - FR-12 / AC-17
+        Note over Orch: spaceFuture.get() -> AIException.isTransport()==true<br/>NO DB write - row stays PENDING_ANALYSIS for poller retry
+        Orch-->>AICtrl: throw AIException(AI_SERVICE_UNAVAILABLE)
+        AICtrl-->>Orch: 502 {errorCode:"AI_SERVICE_UNAVAILABLE"}
+    end
+    end
+
+    %% ==========================================================
+    %% (C) Polling observes ANALYZED -> StyleSelectionScreen
+    %% ==========================================================
+    rect rgba(255,243,205,0.35)
+    Note over Analyzing,Style: (C) Polling sees status=ANALYZED (FR-19)
+    Analyzing->>SpaceCtrl: GET /api/v1/spaces/{roomId}
+    SpaceCtrl-->>Analyzing: 200 {status:ANALYZED, style:"MODERN", styleConfidence:0.72, ...}
+    Analyzing->>Style: navigation.replace('StyleSelection',<br/>{roomId, aiDetectedStyle, aiDetectedConfidence})
+    end
+
+    %% ==========================================================
+    %% (D) User picks preferred style -> PUT -> Recommendation
+    %% ==========================================================
+    rect rgba(228,212,245,0.35)
+    Note over User,SpaceCtrl: (D) User selects preferred style (FR-18 / AC-22..AC-26)
+    User->>Style: tap option (CURRENT | MODERN | SIMPLE | CLASSIC | SCANDINAVIAN | INDUSTRIAL)
+    User->>Style: tap [다음]
+    Style->>SpaceCtrl: PUT /api/v1/spaces/{roomId}/preferred-style<br/>header X-User-Id<br/>body {"preferredStyle":"MODERN"}
+    SpaceCtrl->>SpaceCtrl: PreferredStyle.fromNullable(raw) -> enum or null (AC-24)
+    SpaceCtrl->>Pers: loadForRead(roomId)
+    Pers-->>SpaceCtrl: Space
+    Note over SpaceCtrl: authorize X-User-Id == space.user_id (AC-20)<br/>require status == ANALYZED (AC-25)
+    SpaceCtrl->>Pers: setPreferredStyle(roomId, enum) [REQUIRES_NEW]
+    Pers->>DB: UPDATE spaces SET preferred_style=? WHERE room_id=?
+    DB-->>Pers: 1 row
+    Pers-->>SpaceCtrl: updated Space
+    SpaceCtrl-->>Style: 200 SpaceResponse{preferredStyle:"MODERN", ...}
+    Style->>Style: navigation.replace('Recommendation', {roomId})<br/>(Task 5 owns that screen)
+    end
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% Python /analyze/style .............................. FR-1 / FR-2 / FR-3 / FR-4 / FR-6 / FR-7 / AC-1..AC-8
+%% StyleAnalysisClient + DTOs ......................... FR-8 / AC-11
+%% V3 migration + Space.preferredStyle ................ FR-9 / FR-10 / AC-9 / AC-18
+%% AIOrchestrator parallel fan-out .................... FR-11 / AC-12 / AC-13
+%% Partial-success matrix (four branches) ............. FR-12 / AC-14 / AC-15 / AC-16 / AC-17
+%% Error-code mapping (style-only failures degrade) ... FR-13
+%% Public endpoints (GET + PUT preferred-style) ....... FR-14 / FR-15 / AC-19..AC-26
+%% Configuration surface .............................. FR-16 / AC-34
+%% Observability single-line INFO ..................... FR-17
+%% AnalyzingScreen polling (exp backoff, 60s budget) .. FR-19 / AC-31..AC-33
+%% StyleSelectionScreen (six Korean options, badge) ... FR-18 / AC-28..AC-30
+%% Shared Style/PreferredStyle enums .................. FR-20 / AC-10 / AC-27
+%% RN API client getSpace / setPreferredStyle ......... FR-21
+%% StyleConfidenceCache (transient, 15min TTL) ........ FR-14 (styleConfidence field, nullable)
+%% PRD section 8 "par [AI 병렬 처리]" ................... par block in (B)
+%% PRD section 6 UC-01 step 3 "스타일 설정" ............. (D) block

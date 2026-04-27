@@ -1,0 +1,56 @@
+%% AuthenticSelf - UC-02-wishlist: state machine for a single wishlist row
+%% FR-7 / FR-10 / AC-22..AC-25 / AC-52 invariant:
+%%   status='Active'    <=>  purchased_at IS NULL
+%%   status='Purchased' <=>  purchased_at IS NOT NULL
+%%
+%% Rejected transitions come out as 400 INVALID_STATE_TRANSITION
+%% (unknown / null / blank body.status) - "same state" is NOT an error
+%% per AC-24: it is an idempotent 200 no-op that does NOT mutate
+%% purchased_at or updated_at.
+%%
+%% Sources of truth:
+%%   src/backend/src/main/java/com/authenticself/wishlist/WishlistService.java#patch
+%%   src/backend/src/main/java/com/authenticself/wishlist/WishlistService.java#parseTargetStatus
+%%   src/backend/src/main/java/com/authenticself/wishlist/WishlistPersistence.java#updateStatus
+%%   src/backend/src/main/resources/db/migration/V6__extend_wishlist_timestamps.sql
+
+stateDiagram-v2
+    direction LR
+
+    [*] --> ACTIVE : POST /api/v1/wishlist<br/>DB default purchased_at=NULL<br/>FR-4 / AC-7
+
+    ACTIVE --> PURCHASED : PATCH body={status:'PURCHASED'}<br/>purchased_at := LocalDateTime.now(UTC)<br/>updated_at := now<br/>log fromStatus=Active toStatus=Purchased<br/>FR-7 / AC-22 / AC-52
+
+    PURCHASED --> ACTIVE : PATCH body={status:'ACTIVE'}<br/>purchased_at := NULL<br/>updated_at := now<br/>log fromStatus=Purchased toStatus=Active<br/>FR-7 / AC-23 / AC-52
+
+    ACTIVE --> ACTIVE : PATCH body={status:'ACTIVE'}  (no-op)<br/>updated_at NOT touched, purchased_at NOT touched<br/>HTTP 200, response unchanged<br/>log noop=true<br/>FR-7 / AC-24
+
+    PURCHASED --> PURCHASED : PATCH body={status:'PURCHASED'}  (no-op)<br/>updated_at NOT touched, purchased_at NOT touched<br/>HTTP 200, response unchanged<br/>log noop=true<br/>FR-7 / AC-24
+
+    ACTIVE --> [*] : DELETE /api/v1/wishlist/{wishlistId}<br/>hard DELETE, no tombstone<br/>FR-8 / AC-27
+
+    PURCHASED --> [*] : DELETE /api/v1/wishlist/{wishlistId}<br/>hard DELETE, allowed from either state<br/>FR-8 / AC-27
+
+    state "(rejected transitions)" as Rej
+    Rej : body.status in {null, blank}<br/>-> INVALID_STATE_TRANSITION 400
+    Rej : body.status NOT in {ACTIVE, PURCHASED}<br/>-> INVALID_STATE_TRANSITION 400
+    Rej : (case-insensitive, service uppercases before match)
+    Rej : PATCH wishlistId owned by another user<br/>-> WISHLIST_ITEM_NOT_FOUND 404 (AC-26)
+
+    ACTIVE --> Rej : invalid payload
+    PURCHASED --> Rej : invalid payload
+
+    note right of ACTIVE
+        Invariant (AC-52):
+          status='Active' <=> purchased_at IS NULL
+        addedAt is DB-populated on INSERT and
+        NEVER mutated thereafter (Wishlist.java
+        addedAt is insertable=false updatable=false).
+    end note
+
+    note right of PURCHASED
+        Invariant (AC-52):
+          status='Purchased' <=> purchased_at IS NOT NULL
+        purchased_at is a UTC LocalDateTime at
+        mutation time (service resets on Purchased->Active).
+    end note

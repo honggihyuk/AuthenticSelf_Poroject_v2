@@ -1,0 +1,122 @@
+%% AuthenticSelf - UC-01-recommendation: ER slice for recommendation flow
+%%
+%% Delta from artifacts/UC-01-style-selection/viz/er.mmd (V1 + V2 + V3):
+%%   V4 extends the `furniture` table with 8 columns
+%%   V5 seeds 28 rows (7 per category)
+%%   NO schema changes to spaces / users / wishlist.
+%%   NO new tables in this task (recommendations live in Spring-side
+%%   in-memory cache only — see design.md §2.2).
+%%
+%% Source of truth:
+%%   src/backend/src/main/resources/db/migration/V1__init_schema.sql
+%%   src/backend/src/main/resources/db/migration/V4__extend_furniture_catalog.sql
+%%   src/backend/src/main/resources/db/migration/V5__seed_furniture_catalog.sql
+%%   src/backend/src/main/java/com/authenticself/domain/Furniture.java
+%%   src/backend/src/main/java/com/authenticself/repository/FurnitureRepository.java
+%%
+%% Notation:
+%%   "V4-add" = column added by V4 in this task (FR-15 / AC-24).
+%%   "V1-*"   = Task-1 baseline column, preserved unchanged.
+%%   "V1 read-only" = this task reads but never writes.
+%%
+%% Only the slice the scorer + orchestrator touches is shown. Users and
+%% wishlist are referenced for cardinality completeness; this task does not
+%% touch them. Sibling viz/er diagrams carry the full platform snapshot.
+
+erDiagram
+    users     ||--o{ spaces   : "owns / analyzes"
+    users     ||--o{ wishlist : "owns (Task 6 - not wired here)"
+    furniture ||--o{ wishlist : "catalogued by (Task 6)"
+
+    %% -----------------------------------------------------------------
+    %% spaces - READ-ONLY from the orchestrator in this task.
+    %% Columns consumed: room_id (PK), user_id (auth), status (guard),
+    %% dimensions (parsed by parseDimensions), main_color (mainColor in req),
+    %% style (detectedStyle in req, nullable), preferred_style (target style).
+    %% -----------------------------------------------------------------
+    spaces {
+        VARCHAR_64   room_id            PK "V1 - FindById(roomId)"
+        VARCHAR_64   user_id            FK "V1 - authorize X-User-Id == user_id"
+        ENUM         status                "V2 - guard: must be ANALYZED (AC-31)"
+        VARCHAR_100  dimensions            "V2 NULL - parseDimensions (e.g. '4.0x4.0x2.4m')"
+        VARCHAR_32   main_color            "V2 NULL - mainColor in Python request"
+        VARCHAR_64   style                 "V2 NULL - detectedStyle (nullable; FR-4)"
+        VARCHAR_32   preferred_style       "V3 NULL - CacheKey + resolve_style (AC-32)"
+        DATETIME     analysis_date         "V2 NULL (not used by this task)"
+    }
+
+    %% -----------------------------------------------------------------
+    %% furniture - the catalog scored on every cache-miss (V4 / V5).
+    %% Every column (except the Task-1 `style` + `size` strings) is consumed
+    %% by the scorer; `style` + `size` are kept as legacy Task-1 columns
+    %% but NOT passed to Python (styleTags CSV supersedes them).
+    %% -----------------------------------------------------------------
+    furniture {
+        VARCHAR_64   furniture_id   PK "V1 - opaque id, pattern f_<cat>_<nnn>"
+        VARCHAR_100  name              "V4-add NOT NULL - card primary text (AC-45)"
+        VARCHAR_32   type              "V1 - must be desk|bed|chair|lighting (AC-4)"
+        VARCHAR_64   style             "V1 - legacy single-style label (not used by scorer)"
+        VARCHAR_100  size              "V1 - legacy human label (not used by scorer)"
+        INT          price             "V4-add NOT NULL - KRW integer won, tie-breaker (FR-9)"
+        VARCHAR_512  image_url         "V4-add NULL - nullable on wire (RN handles placeholder)"
+        VARCHAR_7    color_hex         "V4-add NOT NULL - '#RRGGBB' (FR-6)"
+        INT          width_cm          "V4-add NOT NULL - FR-5 hard-fit + footprint"
+        INT          length_cm         "V4-add NOT NULL - FR-5 hard-fit + footprint"
+        INT          height_cm         "V4-add NOT NULL - FR-5 hard-fit ceiling check"
+        VARCHAR_255  style_tags        "V4-add NOT NULL - CSV tags (FR-7 / AC-26)"
+    }
+
+    %% -----------------------------------------------------------------
+    %% users - referenced only via spaces.user_id in the auth check.
+    %% -----------------------------------------------------------------
+    users {
+        VARCHAR_64   user_id      PK "V1 - matched against X-User-Id"
+        VARCHAR_100  name            "V1 - not read here"
+        VARCHAR_255  email        UK "V1 - not read here"
+    }
+
+    %% -----------------------------------------------------------------
+    %% wishlist - not touched by this task (stub button only).
+    %% UC-02 / Task 6 will add writes; AR-furniture-placement / Task 8
+    %% will add reads on furniture_id + dims for the AR preview.
+    %% -----------------------------------------------------------------
+    wishlist {
+        VARCHAR_64   wishlist_id  PK "Task 1 - not touched by Task 5"
+        VARCHAR_64   user_id      FK "Task 1"
+        VARCHAR_64   furniture_id FK "Task 1 - candidate target of stub button"
+        ENUM         status          "Task 1 - Active|Purchased (UC-02)"
+    }
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% V4 delta on furniture (this task):
+%%   ADD COLUMN name        VARCHAR(100) NOT NULL DEFAULT ''         ... FR-15 / AC-24
+%%   ADD COLUMN price       INT          NOT NULL DEFAULT 0          ... FR-15 / AC-24
+%%   ADD COLUMN image_url   VARCHAR(512) NULL                         ... FR-15 / AC-24
+%%   ADD COLUMN color_hex   VARCHAR(7)   NOT NULL DEFAULT '#CCCCCC'  ... FR-15 / AC-24
+%%   ADD COLUMN width_cm    INT          NOT NULL DEFAULT 0          ... FR-15 / AC-24
+%%   ADD COLUMN length_cm   INT          NOT NULL DEFAULT 0          ... FR-15 / AC-24
+%%   ADD COLUMN height_cm   INT          NOT NULL DEFAULT 0          ... FR-15 / AC-24
+%%   ADD COLUMN style_tags  VARCHAR(255) NOT NULL DEFAULT ''         ... FR-15 / AC-24
+%%   Defaults exist only for the ALTER to succeed on already-seeded dev
+%%   DBs. V5 immediately replaces every row.
+%%
+%% V5 seed (AC-25 / AC-26):
+%%   28 rows total (7 per category x 4 categories; >= 24 required).
+%%   Each category has >= 1 oversize row (width_cm or length_cm > 400) to
+%%   cover FR-5 hard-fail tests and >= 1 clashing-color row to cover FR-6.
+%%   Every PreferredStyle enum value (except CURRENT) appears in at least
+%%   one row's style_tags.
+%%
+%% NO new tables:
+%%   - recommendations are NOT persisted (in-memory cache only - FR-14).
+%%   - detected-objects are NOT persisted (emptyList() always sent -
+%%     design.md §2.3 + AC-38). A future task will add
+%%     space_detected_objects and flip the Spring side from emptyList()
+%%     to a DB read.
+%%
+%% Cardinalities (PRD section 7) - unchanged:
+%%   users(1) --o{ spaces(0..*)
+%%   users(1) --o{ wishlist(0..*)
+%%   furniture(1) --o{ wishlist(0..*)

@@ -1,0 +1,87 @@
+%% AuthenticSelf - AR-furniture-placement: ARPlacementScreen state machine
+%% Five values of `status` + a paired `errorCode` for the error branch.
+%% Source-of-truth enum (src/mobile/src/screens/ARPlacementScreen.tsx:122):
+%%   type ARStatus = 'loading' | 'live' | 'placed' | 'cancelled' | 'error';
+%%
+%% Design.md §5 used 'live' (matches source); some task-brief drafts wrote
+%% 'ar_active' / 'committed' / 'not_supported'. This diagram follows the
+%% SOURCE enum; the mapping is called out in the README delta list.
+%%
+%% Transitions are triggered by outbound bridge messages (decodeOutbound
+%% from bridge.ts) OR by the teardown useEffect. Every transition is
+%% pinned to the AC that exercises it.
+%%
+%% FR / AC anchors:
+%%   FR-5 (shell)           FR-6 (error)     FR-7 (placed + Alert)
+%%   FR-8 (cancelled)       FR-10 (teardown) AC-21 / AC-22 / AC-25..AC-32
+
+stateDiagram-v2
+    direction LR
+
+    [*] --> loading : mount with<br/>route.params = { roomId, item }<br/>FR-5
+
+    loading --> live : useEffect on mount<br/>setStatus('live') + webviewRef.inject(loadPayload)<br/>renders testID='ar-webview'<br/>AC-21
+
+    live --> placed : onMessage({event:'placed', pose})<br/>via decodeOutbound<br/>handlePlaced → emitArFurniturePlaced(...)<br/>Alert.alert('배치 완료', ...)<br/>FR-7 / AC-22 / AC-23 / AC-30
+
+    live --> cancelled : onMessage({event:'cancelled'})<br/>handleCancelled → navigation.goBack()<br/>(NO Alert, NO addToWishlist call)<br/>FR-8 / AC-25
+
+    live --> error : onMessage({event:'error', errorCode})<br/>OR ARWebView.onDecodeError<br/>→ handleError(code)<br/>setErrorCode + setStatus('error')<br/>FR-6 / AC-26 / AC-27
+
+    placed --> [*] : Alert dismissal (either button)<br/>navigation.goBack() → screen unmount<br/>TEARDOWN useEffect injects unload message<br/>AC-28 / AC-29<br/>(ONE-WAY: no recovery within-screen)
+
+    cancelled --> [*] : already dispatched goBack()<br/>unmount fires teardown useEffect<br/>AC-29<br/>(ONE-WAY)
+
+    error --> [*] : user taps [돌아가기] (testID=btn-ar-back)<br/>→ navigation.goBack() → unmount<br/>teardown useEffect injects unload<br/>AC-32 / AC-29<br/>(ONE-WAY: no retry, no recovery)
+
+    note right of loading
+        Transient - collapses to 'live' on
+        the same tick as the mount useEffect.
+        The WebView IS mounted during 'loading'
+        (the ref is populated by first render),
+        so AC-21 passes under 'live'.
+    end note
+
+    note right of live
+        WebView (testID=ar-webview) mounted.
+        btnPlace disabled until model-viewer
+        fires its 'load' event inside the
+        HTML scene (AC-27 tests that on
+        'error' transition, ar-webview
+        DISAPPEARS - the fallback panel
+        renders the inlined branch instead).
+    end note
+
+    note right of placed
+        Transient - Alert's button callback
+        synchronously calls navigation.goBack().
+        State is observable by tests because
+        setStatus('placed') runs BEFORE
+        Alert.alert is invoked (AC-22).
+        emitArFurniturePlaced fires exactly
+        once here (AC-30), BEFORE the wishlist
+        branch so analytics fire regardless
+        of button choice.
+    end note
+
+    note right of error
+        Terminal until goBack().
+        ar-webview UNMOUNTED (AC-27).
+        ar-fallback MOUNTED with:
+          - Text: AR_ERROR_COPY[errorCode]
+          - Pressable testID='btn-ar-back'
+            accessibilityLabel='돌아가기'
+            accessibilityRole='button' (AC-39)
+        Four errorCode values (AC-26):
+          AR_NOT_SUPPORTED
+          AR_CAMERA_DENIED
+          AR_MODEL_LOAD_FAILED
+          AR_SESSION_ERROR
+    end note
+
+    note left of cancelled
+        Transient - handleCancelled is
+        effectively a goBack() + setStatus
+        call. Covered by AC-25: NO Alert
+        fires, addToWishlist is NOT called.
+    end note

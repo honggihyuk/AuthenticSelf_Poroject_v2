@@ -1,0 +1,265 @@
+{
+  "taskId": "UC-01-style-selection",
+  "specPath": "artifacts/UC-01-style-selection/spec.md",
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "given": "the Python service started via uvicorn",
+      "when": "GET /openapi.json is fetched",
+      "then": "paths contains both /analyze/space and /analyze/style; the Task-3 TODO(task-4) comment referencing /analyze/style no longer appears in src/ai/app/main.py",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-2",
+      "given": "a valid JPEG and a running service",
+      "when": "POST /analyze/style {roomId:'t2', photoUrl:'file://...'} is called",
+      "then": "response is HTTP 200; body conforms: roomId=='t2', status=='OK', style in {MODERN,SIMPLE,CLASSIC,SCANDINAVIAN,INDUSTRIAL}, confidence in [0.0,1.0], scores has exactly the five enum keys, sum(scores.values()) in [0.99,1.01], argmax(scores)==style, scores[style]==confidence (2 dp), processingMs>0",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-3",
+      "given": "the same test JPEG",
+      "when": "POST /analyze/style is called twice with identical request bodies",
+      "then": "both responses have identical style, identical confidence, and identical scores (only processingMs may differ)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-4",
+      "given": "a sample of at least 50 hash-varied JPEG inputs",
+      "when": "POST /analyze/style is called on each",
+      "then": "style is NEVER 'CURRENT'; every response's style is one of the five AI-output enum values",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-5",
+      "given": "a missing file, an unreadable file, and an invalid request body",
+      "when": "each is POSTed to /analyze/style",
+      "then": "response errorCodes are IMAGE_NOT_FOUND, IMAGE_READ_FAILED, INVALID_REQUEST with HTTP 422 — matching Task 3 AC-6/AC-7/AC-8 behavior",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-6",
+      "given": "src/ai/app/routes/style.py",
+      "when": "reading the file",
+      "then": "the handler is async def AND the StyleClassifier.analyze(...) invocation is wrapped in asyncio.to_thread / run_in_threadpool / loop.run_in_executor",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-7",
+      "given": "src/ai/pyproject.toml or requirements.txt",
+      "when": "re-running Task 3 AC-2",
+      "then": "it still passes (no torch, tensorflow, keras, ultralytics in runtime deps)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-8",
+      "given": "src/ai/app/analyzers/style_classifier.py",
+      "when": "grepping",
+      "then": "file contains 'TODO(ml)' AND a reference to a future real model (one of: ResNet, CLIP, transformer, classifier)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-9",
+      "given": "src/backend/src/main/resources/db/migration/",
+      "when": "listed",
+      "then": "a file matching V3__add_preferred_style.sql exists AND content includes ALTER TABLE spaces + ADD COLUMN preferred_style + VARCHAR(32) + NULL",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-10",
+      "given": "the Spring source",
+      "when": "searching for enum Style and enum PreferredStyle",
+      "then": "both exist; Style has exactly {MODERN,SIMPLE,CLASSIC,SCANDINAVIAN,INDUSTRIAL}; PreferredStyle has those five plus CURRENT; CURRENT is NOT in Style",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-11",
+      "given": "StyleAnalysisClient.java",
+      "when": "inspecting its public method",
+      "then": "method signature is StyleAnalysisResponse callStyleAnalysis(String roomId, String photoUrl) — exactly two parameters, DTO return type",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-12",
+      "given": "AIOrchestrator.java",
+      "when": "grepping",
+      "then": "file contains CompletableFuture, supplyAsync, allOf, AND references to both spaceClient.callSpaceAnalysis and styleClient.callStyleAnalysis; no sequential .join()/.get() between the two supplyAsync calls",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-13",
+      "given": "a Spring integration test with WireMock stubs returning 200 after fixedDelay=2000 ms on both /analyze/space and /analyze/style",
+      "when": "POST /internal/v1/spaces/{roomId}/analyze is called",
+      "then": "total response time is < 3000 ms (proves parallel execution — sequential would be >= 4000 ms)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-14",
+      "given": "a PENDING spaces row and both WireMock stubs returning success",
+      "when": "the orchestrator runs",
+      "then": "row has status='ANALYZED', non-null dimensions, main_color, style (one of the five enum values), analysis_date; preferred_style is STILL NULL",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-15",
+      "given": "a PENDING row, the space stub returning 200, and the style stub returning IMAGE_READ_FAILED 422",
+      "when": "the orchestrator runs",
+      "then": "row has status='ANALYZED', non-null dimensions, main_color, analysis_date, BUT style IS NULL; Spring response is HTTP 200 (NOT an error); a log-observable WARN contains the style errorCode",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-16",
+      "given": "a PENDING row, the space stub returning IMAGE_READ_FAILED 422, and the style stub returning 200",
+      "when": "the orchestrator runs",
+      "then": "row has status='FAILED'; style is still NULL; Spring response is HTTP 422 with errorCode=='ANALYSIS_IMAGE_READ_FAILED'; the style success result is discarded",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-17",
+      "given": "a PENDING row, the space port closed, and the style stub returning 200",
+      "when": "the orchestrator runs",
+      "then": "row has status='PENDING_ANALYSIS' (unchanged), style is NULL, analysis_date is NULL; Spring response is HTTP 502 with errorCode=='AI_SERVICE_UNAVAILABLE'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-18",
+      "given": "Space.java",
+      "when": "inspecting its fields",
+      "then": "preferredStyle field exists, annotated @Enumerated(EnumType.STRING), mapped to column preferred_style, nullable=true, and the V3 migration defines the column as VARCHAR(32)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-19",
+      "given": "a spaces row for user u1 with roomId='r1', status='ANALYZED', style='MODERN', preferred_style=NULL",
+      "when": "GET /api/v1/spaces/r1 is called with header X-User-Id: u1",
+      "then": "response is HTTP 200 with body where roomId=='r1', status=='ANALYZED', style=='MODERN', preferredStyle==null; schema contains dimensions, mainColor, analysisDate, uploadedAt, styleConfidence (last may be null)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-20",
+      "given": "the same row as AC-19",
+      "when": "GET /api/v1/spaces/r1 is called with X-User-Id: u2",
+      "then": "response is HTTP 403 with a forbidden errorCode (e.g., FORBIDDEN or SPACE_ACCESS_DENIED); no row data is leaked",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-21",
+      "given": "no spaces row for roomId='ghost'",
+      "when": "GET /api/v1/spaces/ghost is called",
+      "then": "response is HTTP 404 with errorCode=='SPACE_NOT_FOUND'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-22",
+      "given": "a spaces row for u1, roomId='r1', status='ANALYZED'",
+      "when": "PUT /api/v1/spaces/r1/preferred-style is called with X-User-Id: u1 and body {\"preferredStyle\":\"MODERN\"}",
+      "then": "response is HTTP 200; row now has preferred_style='MODERN'; response body echoes preferredStyle:'MODERN'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-23",
+      "given": "the state after AC-22",
+      "when": "PUT is repeated with 'SIMPLE' and then again with 'SIMPLE'",
+      "then": "first repeat returns 200 and row has preferred_style='SIMPLE'; second repeat returns 200 with row unchanged",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-24",
+      "given": "a spaces row with status='ANALYZED'",
+      "when": "PUT is called with body {\"preferredStyle\":\"BAROQUE\"}",
+      "then": "response is HTTP 400 with errorCode=='INVALID_PREFERRED_STYLE'; row is unchanged",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-25",
+      "given": "a spaces row with status='PENDING_ANALYSIS'",
+      "when": "PUT is called with a valid enum value",
+      "then": "response is HTTP 409 with errorCode=='ANALYSIS_NOT_READY'; row's preferred_style is STILL NULL",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-26",
+      "given": "a spaces row with status='ANALYZED'",
+      "when": "PUT is called with {\"preferredStyle\":\"CURRENT\"}",
+      "then": "response is HTTP 200 and preferred_style='CURRENT' — confirming CURRENT is a valid user pick",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-27",
+      "given": "src/mobile/src/types/style.ts",
+      "when": "read",
+      "then": "exports Style and PreferredStyle types matching the Spring enums exactly (five and six values); exports PREFERRED_STYLE_LABELS with the six Korean labels from FR-20",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-28",
+      "given": "src/mobile/src/screens/StyleSelectionScreen.tsx rendered with aiDetectedStyle='MODERN' and aiDetectedConfidence=0.72",
+      "when": "inspecting the rendered output",
+      "then": "output contains all six Korean labels AND substring 'AI가 감지한 스타일' AND 'Modern' or '모던' AND '72%'",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-29",
+      "given": "the same screen rendered with aiDetectedStyle=null",
+      "when": "inspected",
+      "then": "the screen does NOT contain 'AI가 감지한 스타일'; it DOES contain a fallback substring (e.g. '직접 선택'); CURRENT is pre-selected",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-30",
+      "given": "the screen rendered with any valid aiDetectedStyle",
+      "when": "the user selects 'SIMPLE' and taps Next (simulated)",
+      "then": "the RN API client's setPreferredStyle(roomId, 'SIMPLE') is invoked exactly once",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-31",
+      "given": "a mocked getSpace returning status='PENDING_ANALYSIS' five times then 'ANALYZED' on the sixth call",
+      "when": "AnalyzingScreen mounts",
+      "then": "getSpace is called at least six times; intervals (fake timer) are non-decreasing and each <= 10000 ms; after the sixth call, navigation to StyleSelectionScreen fires with roomId and aiDetectedStyle in route params",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-32",
+      "given": "a mocked getSpace that always returns status='PENDING_ANALYSIS'",
+      "when": "fake time advances past 60000 ms",
+      "then": "polling stops; UI shows a timeout error (substring '시간 초과' or equivalent); no further getSpace calls occur after 60 s",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-33",
+      "given": "the same mock as AC-32",
+      "when": "the screen unmounts after 5 s",
+      "then": "no additional getSpace calls fire after unmount (spy call count frozen)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-34",
+      "given": "src/backend/src/main/resources/application.yml",
+      "when": "parsed",
+      "then": "keys app.ai.style.base-url, app.ai.style.connect-timeout-ms, app.ai.style.read-timeout-ms, app.ai.orchestrator.executor.core-size, app.ai.orchestrator.executor.max-size, app.ai.orchestrator.executor.queue-capacity are present with defaults from FR-16",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-35",
+      "given": "artifacts/UC-01-style-selection/api_contract.yaml",
+      "when": "parsed as OpenAPI 3.0.x",
+      "then": "defines Python POST /analyze/style, Spring GET /api/v1/spaces/{roomId}, Spring PUT /api/v1/spaces/{roomId}/preferred-style, shared error envelopes, and all six PreferredStyle enum values in the request-body schema",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-36",
+      "given": "the full verification suite",
+      "when": "re-running UC-01-space-analysis AC-1..AC-27",
+      "then": "all previously-passing ACs still pass (orchestrator happy-path now also writes style; short-circuit works; analyzer-failure to FAILED works; space-transport to PENDING works). The one exception is Task 3 AC-26 (no V3 migration) which is explicitly overridden by this task's FR-9 / AC-9",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-37",
+      "given": "the full verification suite",
+      "when": "re-running UC-01-photo-upload AC-1..AC-22",
+      "then": "all pass — this task makes no changes to the upload endpoint or error envelope",
+      "test_type": "integration"
+    }
+  ]
+}

@@ -1,0 +1,484 @@
+openapi: 3.0.3
+info:
+  title: AuthenticSelf — UC-03-admin-overview API contract
+  version: "0.7.0"
+  description: |
+    Contract for the five admin aggregation endpoints introduced by Task 7
+    (UC-03-admin-overview):
+
+      * GET /api/v1/admin/overview?window=...  — master, all four tiles
+      * GET /api/v1/admin/users?window=...     — Users tile only
+      * GET /api/v1/admin/rooms?window=...     — Rooms tile only
+      * GET /api/v1/admin/wishlist?window=...  — Wishlist tile only
+      * GET /api/v1/admin/sales?window=...     — Sales tile only
+
+    Every endpoint requires the shared `X-User-Id` header (stub-auth
+    identical to UC-01 / UC-02 convention) AND that the header refers to
+    a row with `users.role='ADMIN'`. Every non-2xx response carries the
+    shared `SpringErrorResponse` envelope `{errorCode, message,
+    correlationId}` — byte-identical to the envelope emitted by the
+    sibling tasks.
+
+    Window filter values:
+      - `LAST_7D`  — rows dated in the last 7 days (Asia/Seoul).
+      - `LAST_30D` — rows dated in the last 30 days (Asia/Seoul).
+      - `ALL`      — no date predicate (default when `window` is absent).
+
+    Shape invariants (enforced by tests, not the schema alone):
+      - `statusDistribution` sum == `totalSpaces` (Rooms tile).
+      - `statusDistribution` sum == `totalItems`  (Wishlist tile).
+      - `categoryDistribution` sum == `totalItems` (Wishlist tile).
+      - `salesByCategory` sum == `totalSalesKrw`  (Sales tile).
+      - `conversionRate` == 0.0 when `totalItems` == 0 (no divide-by-zero).
+      - `mainColorTop5` length ≤ `app.admin.top-colors-limit`.
+
+servers:
+  - url: http://localhost:8080
+    description: Spring public API
+
+tags:
+  - name: admin
+    description: |
+      Admin-only analytics endpoints. Non-admin callers receive 403
+      `NOT_ADMIN`. The client surface (RN / admin web SPA) is deferred
+      to `UC-03-admin-client` — no client code in this iteration.
+
+paths:
+  # =================================================================
+  # GET /api/v1/admin/overview
+  # =================================================================
+  /api/v1/admin/overview:
+    get:
+      tags: [admin]
+      operationId: getAdminOverview
+      summary: Fetch all four admin tiles in one response.
+      parameters:
+        - $ref: '#/components/parameters/XUserId'
+        - $ref: '#/components/parameters/WindowQuery'
+      responses:
+        '200':
+          description: Success — master aggregate.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOverviewResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # =================================================================
+  # GET /api/v1/admin/users
+  # =================================================================
+  /api/v1/admin/users:
+    get:
+      tags: [admin]
+      operationId: getAdminUsers
+      summary: Fetch the Users tile only.
+      parameters:
+        - $ref: '#/components/parameters/XUserId'
+        - $ref: '#/components/parameters/WindowQuery'
+      responses:
+        '200':
+          description: Success — Users tile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsersTileResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # =================================================================
+  # GET /api/v1/admin/rooms
+  # =================================================================
+  /api/v1/admin/rooms:
+    get:
+      tags: [admin]
+      operationId: getAdminRooms
+      summary: Fetch the Rooms tile only.
+      parameters:
+        - $ref: '#/components/parameters/XUserId'
+        - $ref: '#/components/parameters/WindowQuery'
+      responses:
+        '200':
+          description: Success — Rooms tile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomsTileResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # =================================================================
+  # GET /api/v1/admin/wishlist
+  # =================================================================
+  /api/v1/admin/wishlist:
+    get:
+      tags: [admin]
+      operationId: getAdminWishlist
+      summary: Fetch the Wishlist tile only.
+      parameters:
+        - $ref: '#/components/parameters/XUserId'
+        - $ref: '#/components/parameters/WindowQuery'
+      responses:
+        '200':
+          description: Success — Wishlist tile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WishlistTileResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # =================================================================
+  # GET /api/v1/admin/sales
+  # =================================================================
+  /api/v1/admin/sales:
+    get:
+      tags: [admin]
+      operationId: getAdminSales
+      summary: Fetch the Sales tile only.
+      parameters:
+        - $ref: '#/components/parameters/XUserId'
+        - $ref: '#/components/parameters/WindowQuery'
+      responses:
+        '200':
+          description: Success — Sales tile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SalesTileResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  # -----------------------------------------------------------------
+  # Reusable parameters
+  # -----------------------------------------------------------------
+  parameters:
+    XUserId:
+      name: X-User-Id
+      in: header
+      required: true
+      description: |
+        Stub-auth user identifier. Missing / blank → 400
+        `MISSING_USER_HEADER` (string value identical to the code emitted
+        by UC-01 / UC-02 endpoints).
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+
+    WindowQuery:
+      name: window
+      in: query
+      required: false
+      description: |
+        Time-window filter. Case-insensitive. Absent / blank → `ALL`
+        (default, AC-10). Unknown value → 400 `INVALID_TIME_WINDOW`.
+      schema:
+        $ref: '#/components/schemas/TimeWindow'
+
+  # -----------------------------------------------------------------
+  # Reusable error responses
+  # -----------------------------------------------------------------
+  responses:
+    BadRequest:
+      description: Missing header or invalid window value.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SpringErrorResponse' }
+    Forbidden:
+      description: Authenticated user's role ≠ `ADMIN`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SpringErrorResponse' }
+    NotFound:
+      description: Authenticated user id does not exist.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SpringErrorResponse' }
+
+  # -----------------------------------------------------------------
+  # Schemas
+  # -----------------------------------------------------------------
+  schemas:
+
+    # -------------------- Enums --------------------
+    TimeWindow:
+      type: string
+      enum: [LAST_7D, LAST_30D, ALL]
+      default: ALL
+      description: |
+        Three-value time-window filter. `ALL` applies no date predicate.
+
+    SpaceStatus:
+      type: string
+      enum: [PENDING_ANALYSIS, ANALYZED, FAILED]
+      description: |
+        Current Space.Status Java enum values (FR-6 / AC-16 / AC-34). If a
+        later iteration changes the enum, the test is ground-truthed
+        against `Space.Status.values()` — callers consume the keys they
+        receive, not a hard-coded list.
+
+    Style:
+      type: string
+      enum: [MODERN, SIMPLE, CLASSIC, SCANDINAVIAN, INDUSTRIAL]
+      description: 5-value AI-output style enum (shared with UC-01).
+
+    WishlistRestStatus:
+      type: string
+      enum: [ACTIVE, PURCHASED]
+      description: |
+        REST-surface UPPER_SNAKE casing for the wishlist status
+        distribution. Translated from DB casing `Active`/`Purchased`.
+
+    FurnitureCategory:
+      type: string
+      enum: [desk, bed, chair, lighting]
+      description: 4-value category set shared with UC-01 / UC-02.
+
+    AdminErrorCode:
+      type: string
+      enum:
+        - MISSING_USER_HEADER
+        - INVALID_TIME_WINDOW
+        - USER_NOT_FOUND
+        - NOT_ADMIN
+      description: |
+        Error codes introduced or reused by UC-03-admin-overview.
+        `MISSING_USER_HEADER` + `USER_NOT_FOUND` are reused shared codes
+        (same string values as UC-01 / UC-02). `INVALID_TIME_WINDOW` +
+        `NOT_ADMIN` are new to this task.
+
+    # -------------------- Atomic rows --------------------
+    DateCount:
+      type: object
+      required: [date, count]
+      properties:
+        date:  { type: string, format: date }
+        count: { type: integer, minimum: 0 }
+
+    DateKrw:
+      type: object
+      required: [date, krw]
+      properties:
+        date: { type: string, format: date }
+        krw:  { type: integer, minimum: 0 }
+
+    ColorCount:
+      type: object
+      required: [color, count]
+      properties:
+        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        count: { type: integer, minimum: 0 }
+
+    # -------------------- Distribution maps --------------------
+    # Each map has a fixed, finite key set — keys come from the
+    # matching enum schema and values are non-negative longs.
+    StatusDistributionSpace:
+      type: object
+      description: Key set is exactly Space.Status enum values.
+      additionalProperties:
+        type: integer
+        minimum: 0
+      example:
+        PENDING_ANALYSIS: 0
+        ANALYZED:       198
+        FAILED:          12
+
+    StyleDistribution:
+      type: object
+      description: Key set is exactly the 5-value Style enum.
+      additionalProperties:
+        type: integer
+        minimum: 0
+      example:
+        MODERN:       80
+        SIMPLE:       40
+        CLASSIC:      30
+        SCANDINAVIAN: 35
+        INDUSTRIAL:   13
+
+    StatusDistributionWishlist:
+      type: object
+      description: Key set is exactly {ACTIVE, PURCHASED}.
+      additionalProperties:
+        type: integer
+        minimum: 0
+      example:
+        ACTIVE:    270
+        PURCHASED:  70
+
+    CategoryDistribution:
+      type: object
+      description: Key set is exactly {desk, bed, chair, lighting}.
+      additionalProperties:
+        type: integer
+        minimum: 0
+      example:
+        desk:     120
+        bed:       45
+        chair:     95
+        lighting:  80
+
+    SalesByCategory:
+      type: object
+      description: Sum of values MUST equal `totalSalesKrw`.
+      additionalProperties:
+        type: integer
+        minimum: 0
+      example:
+        desk:     1200000
+        bed:     3200000
+        chair:    540000
+        lighting: 1000000
+
+    # -------------------- Tiles (nested in master overview) --------------------
+    UsersTile:
+      type: object
+      required:
+        [totalUsers, totalAdmins, newSignups, activeUsers, signupsByDay]
+      properties:
+        totalUsers:   { type: integer, minimum: 0 }
+        totalAdmins:  { type: integer, minimum: 0 }
+        newSignups:   { type: integer, minimum: 0 }
+        activeUsers:  { type: integer, minimum: 0 }
+        signupsByDay:
+          type: array
+          items: { $ref: '#/components/schemas/DateCount' }
+
+    RoomsTile:
+      type: object
+      required:
+        [totalSpaces, statusDistribution, styleDistribution, mainColorTop5]
+      properties:
+        totalSpaces: { type: integer, minimum: 0 }
+        statusDistribution: { $ref: '#/components/schemas/StatusDistributionSpace' }
+        styleDistribution:  { $ref: '#/components/schemas/StyleDistribution' }
+        mainColorTop5:
+          type: array
+          items: { $ref: '#/components/schemas/ColorCount' }
+
+    WishlistTile:
+      type: object
+      required:
+        [totalItems, statusDistribution, categoryDistribution, conversionRate]
+      properties:
+        totalItems:  { type: integer, minimum: 0 }
+        statusDistribution:   { $ref: '#/components/schemas/StatusDistributionWishlist' }
+        categoryDistribution: { $ref: '#/components/schemas/CategoryDistribution' }
+        conversionRate:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+          description: |
+            PURCHASED / totalItems rounded to 2 dp; 0.0 when totalItems==0.
+
+    SalesTile:
+      type: object
+      required:
+        [totalSalesKrw, purchasedItemCount, averageOrderKrw, salesByCategory, salesByDay]
+      properties:
+        totalSalesKrw:       { type: integer, minimum: 0 }
+        purchasedItemCount:  { type: integer, minimum: 0 }
+        averageOrderKrw:     { type: integer, minimum: 0 }
+        salesByCategory:     { $ref: '#/components/schemas/SalesByCategory' }
+        salesByDay:
+          type: array
+          items: { $ref: '#/components/schemas/DateKrw' }
+
+    # -------------------- Endpoint-level responses --------------------
+    AdminOverviewResponse:
+      type: object
+      required: [window, generatedAt, users, rooms, wishlist, sales]
+      properties:
+        window:      { $ref: '#/components/schemas/TimeWindow' }
+        generatedAt:
+          type: string
+          format: date-time
+          description: ISO-8601 with `+09:00` offset (Asia/Seoul).
+        users:    { $ref: '#/components/schemas/UsersTile' }
+        rooms:    { $ref: '#/components/schemas/RoomsTile' }
+        wishlist: { $ref: '#/components/schemas/WishlistTile' }
+        sales:    { $ref: '#/components/schemas/SalesTile' }
+
+    UsersTileResponse:
+      type: object
+      required:
+        [window, generatedAt, totalUsers, totalAdmins, newSignups,
+         activeUsers, signupsByDay]
+      properties:
+        window:      { $ref: '#/components/schemas/TimeWindow' }
+        generatedAt: { type: string, format: date-time }
+        totalUsers:  { type: integer, minimum: 0 }
+        totalAdmins: { type: integer, minimum: 0 }
+        newSignups:  { type: integer, minimum: 0 }
+        activeUsers: { type: integer, minimum: 0 }
+        signupsByDay:
+          type: array
+          items: { $ref: '#/components/schemas/DateCount' }
+
+    RoomsTileResponse:
+      type: object
+      required:
+        [window, generatedAt, totalSpaces, statusDistribution,
+         styleDistribution, mainColorTop5]
+      properties:
+        window:      { $ref: '#/components/schemas/TimeWindow' }
+        generatedAt: { type: string, format: date-time }
+        totalSpaces: { type: integer, minimum: 0 }
+        statusDistribution: { $ref: '#/components/schemas/StatusDistributionSpace' }
+        styleDistribution:  { $ref: '#/components/schemas/StyleDistribution' }
+        mainColorTop5:
+          type: array
+          items: { $ref: '#/components/schemas/ColorCount' }
+
+    WishlistTileResponse:
+      type: object
+      required:
+        [window, generatedAt, totalItems, statusDistribution,
+         categoryDistribution, conversionRate]
+      properties:
+        window:      { $ref: '#/components/schemas/TimeWindow' }
+        generatedAt: { type: string, format: date-time }
+        totalItems:  { type: integer, minimum: 0 }
+        statusDistribution:   { $ref: '#/components/schemas/StatusDistributionWishlist' }
+        categoryDistribution: { $ref: '#/components/schemas/CategoryDistribution' }
+        conversionRate:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+
+    SalesTileResponse:
+      type: object
+      required:
+        [window, generatedAt, totalSalesKrw, purchasedItemCount,
+         averageOrderKrw, salesByCategory, salesByDay]
+      properties:
+        window:              { $ref: '#/components/schemas/TimeWindow' }
+        generatedAt:         { type: string, format: date-time }
+        totalSalesKrw:       { type: integer, minimum: 0 }
+        purchasedItemCount:  { type: integer, minimum: 0 }
+        averageOrderKrw:     { type: integer, minimum: 0 }
+        salesByCategory:     { $ref: '#/components/schemas/SalesByCategory' }
+        salesByDay:
+          type: array
+          items: { $ref: '#/components/schemas/DateKrw' }
+
+    # -------------------- Shared error envelope --------------------
+    # Identical shape to UC-01 / UC-02 — NO new envelope introduced
+    # (AC-47).
+    SpringErrorResponse:
+      type: object
+      required: [errorCode, message, correlationId]
+      properties:
+        errorCode:
+          $ref: '#/components/schemas/AdminErrorCode'
+        message:
+          type: string
+          description: Korean, user-facing.
+        correlationId:
+          type: string
+          format: uuid
+          description: UUIDv4 linking the client error to backend logs.

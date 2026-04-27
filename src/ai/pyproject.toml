@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "authenticself-ai"
+version = "0.1.0"
+description = "AuthenticSelf AI service — space analysis FastAPI app (UC-01-space-analysis)."
+requires-python = ">=3.11"
+
+# ---------------------------------------------------------------------------
+# Runtime dependencies (AC-2). Heavy ML frameworks are intentionally excluded
+# from the runtime set — they are placeholder-only in this task. Any real
+# model runtime belongs in [project.optional-dependencies].ml in a future task
+# so the default install stays minimal.
+# ---------------------------------------------------------------------------
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.5",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "pillow>=10.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+# Reserved — populated in a later task once real ML weights are wired in.
+ml = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

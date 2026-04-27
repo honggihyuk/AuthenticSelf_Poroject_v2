@@ -1,0 +1,426 @@
+[
+  {
+    "id": "AC-1",
+    "fr_ref": "FR-1",
+    "layer": "db",
+    "description": "V6 migration file V6__extend_wishlist_timestamps.sql exists under src/backend/src/main/resources/db/migration/ and contains ALTER TABLE wishlist, ADD COLUMN added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, ADD COLUMN purchased_at DATETIME NULL, and ADD CONSTRAINT/INDEX uq_wishlist_user_furniture UNIQUE (user_id, furniture_id).",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/main/resources/db/migration/V6__extend_wishlist_timestamps.sql"
+  },
+  {
+    "id": "AC-2",
+    "fr_ref": "FR-1",
+    "layer": "db",
+    "description": "After all migrations run on MySQL 8 Testcontainers, INFORMATION_SCHEMA.COLUMNS shows wishlist.added_at (DATETIME, NOT NULL, default CURRENT_TIMESTAMP) and wishlist.purchased_at (DATETIME, nullable). INFORMATION_SCHEMA.STATISTICS shows a UNIQUE key named uq_wishlist_user_furniture on columns (user_id, furniture_id).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/migration/V6WishlistTimestampsMigrationTest.java"
+  },
+  {
+    "id": "AC-3",
+    "fr_ref": "FR-1",
+    "layer": "db",
+    "description": "Inserting two rows with the same (user_id, furniture_id) tuple fails with a DataIntegrityViolationException / SQLIntegrityConstraintViolationException (MySQL errorCode 1062 duplicate key on uq_wishlist_user_furniture).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/migration/V6WishlistTimestampsMigrationTest.java#uniqueConstraintRejectsDuplicate"
+  },
+  {
+    "id": "AC-4",
+    "fr_ref": "FR-14",
+    "layer": "db",
+    "description": "V1..V5 migration files are unmodified: no diff introduced in V1__init_schema.sql, V2__add_spaces_status_and_photo.sql, V3__add_preferred_style.sql, V4__extend_furniture_catalog.sql, V5__seed_furniture_catalog.sql.",
+    "verify_by": "static",
+    "target_file_or_test": "git diff / file-hash snapshot across the five prior migration files"
+  },
+  {
+    "id": "AC-5",
+    "fr_ref": "FR-2",
+    "layer": "backend",
+    "description": "com.authenticself.domain.Wishlist has @Column addedAt (LocalDateTime, maps to added_at, nullable=false, insertable=false, updatable=false) and purchasedAt (LocalDateTime, nullable, maps to purchased_at, insertable+updatable=true). The Status enum values remain exactly [Active, Purchased]. All V1 column mappings (wishlistId, userId, furnitureId, category, price, status, createdAt, updatedAt) remain present with identical names.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/domain/Wishlist.java"
+  },
+  {
+    "id": "AC-6",
+    "fr_ref": "FR-3",
+    "layer": "backend",
+    "description": "com.authenticself.repository.WishlistRepository exists, extends JpaRepository<Wishlist, String>, and declares exactly the three methods findByUserIdAndFurnitureId(String, String), findAllByUserIdAndStatusOrderByUpdatedAtDesc(String, Wishlist.Status), and findByWishlistIdAndUserId(String, String) with the return types specified in FR-3.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/repository/WishlistRepository.java"
+  },
+  {
+    "id": "AC-7",
+    "fr_ref": "FR-4,FR-5",
+    "layer": "backend",
+    "description": "Given a seeded user u1 and furniture f_desk_001, when POST /api/v1/wishlist {furnitureId:'f_desk_001',category:'desk',price:189000} with X-User-Id:u1 is called, then response is HTTP 201 with body {wishlistId:<uuid>, userId:'u1', furnitureId:'f_desk_001', category:'desk', price:189000, status:'Active', addedAt:<iso>, purchasedAt:null, alreadyExists:false}, AND a new wishlist row is persisted.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#postAddCreatesActiveRow_ac7"
+  },
+  {
+    "id": "AC-8",
+    "fr_ref": "FR-4",
+    "layer": "backend",
+    "description": "Given an existing wishlist row for (u1, f_desk_001) with status=Active, when POST /api/v1/wishlist {furnitureId:'f_desk_001',...} with X-User-Id:u1 is called again, then response is HTTP 200 with alreadyExists:true AND the same wishlistId as the existing row AND the row's addedAt/price/status are unchanged AND wishlist row count for that (userId,furnitureId) remains 1.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#postAddIsIdempotent_ac8"
+  },
+  {
+    "id": "AC-9",
+    "fr_ref": "FR-4",
+    "layer": "backend",
+    "description": "Given an existing wishlist row for (u1, f_desk_001) with status=Purchased, when POST /api/v1/wishlist is re-invoked for the same pair, then response is HTTP 200 with alreadyExists:true AND the returned status is 'Purchased' (NOT reset to Active). The row's purchasedAt timestamp is unchanged.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#postAddDoesNotResetPurchased_ac9"
+  },
+  {
+    "id": "AC-10",
+    "fr_ref": "FR-4",
+    "layer": "backend",
+    "description": "POST /api/v1/wishlist with a furnitureId that does not exist returns HTTP 404 with errorCode='FURNITURE_NOT_FOUND' and no row is inserted.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#postAddUnknownFurniture_ac10"
+  },
+  {
+    "id": "AC-11",
+    "fr_ref": "FR-4",
+    "layer": "backend",
+    "description": "POST /api/v1/wishlist with X-User-Id referencing an unknown user returns HTTP 404 with errorCode='USER_NOT_FOUND'.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#postAddUnknownUser_ac11"
+  },
+  {
+    "id": "AC-12",
+    "fr_ref": "FR-5",
+    "layer": "backend",
+    "description": "POST /api/v1/wishlist with body {category:'sofa',...} (not in {desk,bed,chair,lighting}) returns HTTP 400 with errorCode='INVALID_WISHLIST_PAYLOAD'.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#postAddInvalidCategory_ac12"
+  },
+  {
+    "id": "AC-13",
+    "fr_ref": "FR-5",
+    "layer": "backend",
+    "description": "POST /api/v1/wishlist with body {price:-1,...} returns HTTP 400 with errorCode='INVALID_WISHLIST_PAYLOAD'.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#postAddNegativePrice_ac13"
+  },
+  {
+    "id": "AC-14",
+    "fr_ref": "FR-5,FR-9",
+    "layer": "backend",
+    "description": "POST /api/v1/wishlist without the X-User-Id header returns HTTP 400 with errorCode='MISSING_USER_HEADER' and the response body conforms to the shared ErrorResponse {errorCode, message, correlationId} shape.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#postAddMissingUserHeader_ac14"
+  },
+  {
+    "id": "AC-15",
+    "fr_ref": "NFR concurrency",
+    "layer": "backend",
+    "description": "Two concurrent POST /api/v1/wishlist calls for the same (userId, furnitureId) resolve to exactly one persisted wishlist row (the second call sees DataIntegrityViolation on uq_wishlist_user_furniture, which the service translates to a successful 200 alreadyExists:true response).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistServiceConcurrencyTest.java#parallelAddCreatesOneRow_ac15"
+  },
+  {
+    "id": "AC-16",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "Given a user with 2 Active and 1 Purchased wishlist rows, GET /api/v1/wishlist (no status filter) with X-User-Id returns HTTP 200 with totalActive=2, totalPurchased=1, and items ordered ACTIVE-first (both subsets internally sorted by updated_at DESC).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#getListUnfiltered_ac16"
+  },
+  {
+    "id": "AC-17",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "GET /api/v1/wishlist?status=ACTIVE returns only rows whose DB status='Active'; GET /api/v1/wishlist?status=PURCHASED returns only rows whose DB status='Purchased'. Filter matching is case-insensitive on the query value ('active', 'Active', 'ACTIVE' all accepted).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#getListFilterByStatus_ac17"
+  },
+  {
+    "id": "AC-18",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "GET /api/v1/wishlist?status=PENDING returns HTTP 400 with errorCode='INVALID_WISHLIST_STATUS_FILTER' (only ACTIVE / PURCHASED accepted).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#getListInvalidFilter_ac18"
+  },
+  {
+    "id": "AC-19",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "GET /api/v1/wishlist items[] each contain a furnitureSnapshot object with non-null keys name, imageUrl (nullable), colorHex, type — sourced from the current furniture row. Deleting a furniture row (FK RESTRICT prevents this for wishlisted rows, so this test uses a catalog item that was pre-seeded, wishlisted, then had its wishlist row retained across a hypothetical catalog row expiry) yields furnitureSnapshot=null while the wishlistId remains listable.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#getListSnapshotPresentAndNullable_ac19"
+  },
+  {
+    "id": "AC-20",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "GET /api/v1/wishlist for a user u1 never returns rows whose user_id != 'u1' (no cross-user leakage). Verified by seeding rows under (u1, f_desk_001), (u2, f_desk_001) and asserting the response for X-User-Id:u1 contains exactly the u1-owned row.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#getListNoCrossUser_ac20"
+  },
+  {
+    "id": "AC-21",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "When a user has more than app.wishlist.max-items-per-user (500 default) rows, GET /api/v1/wishlist returns the 500 most-recently-updated rows AND the top-level field truncated=true.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#getListTruncation_ac21"
+  },
+  {
+    "id": "AC-22",
+    "fr_ref": "FR-7,FR-10",
+    "layer": "backend",
+    "description": "Given an Active wishlist row w1 owned by u1, PATCH /api/v1/wishlist/w1 body {status:'PURCHASED'} with X-User-Id:u1 returns HTTP 200 with status='Purchased' AND the row's purchased_at is set to a non-null timestamp within the last 5 seconds. updated_at also advances.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#patchActiveToPurchased_ac22"
+  },
+  {
+    "id": "AC-23",
+    "fr_ref": "FR-7,FR-10",
+    "layer": "backend",
+    "description": "Given a Purchased wishlist row w1 owned by u1 (purchased_at populated), PATCH /api/v1/wishlist/w1 body {status:'ACTIVE'} with X-User-Id:u1 returns HTTP 200 with status='Active' AND purchased_at is reset to NULL.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#patchPurchasedToActive_ac23"
+  },
+  {
+    "id": "AC-24",
+    "fr_ref": "FR-7,FR-10",
+    "layer": "backend",
+    "description": "Given an Active wishlist row w1, PATCH {status:'ACTIVE'} returns HTTP 200 AND is a no-op: purchased_at stays NULL, updated_at is NOT bumped (compared byte-for-byte to the pre-call updated_at via INFORMATION_SCHEMA or JPA re-fetch). Same assertion for Purchased→Purchased no-op.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#patchNoOpIdempotent_ac24"
+  },
+  {
+    "id": "AC-25",
+    "fr_ref": "FR-7,FR-10",
+    "layer": "backend",
+    "description": "PATCH /api/v1/wishlist/w1 body {status:'PENDING'} returns HTTP 400 with errorCode='INVALID_STATE_TRANSITION' AND the row in DB is unchanged (status, purchased_at, updated_at untouched).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#patchInvalidTransition_ac25"
+  },
+  {
+    "id": "AC-26",
+    "fr_ref": "FR-7",
+    "layer": "backend",
+    "description": "PATCH /api/v1/wishlist/nonexistent returns HTTP 404 with errorCode='WISHLIST_ITEM_NOT_FOUND'. Same response when the wishlistId exists but is owned by a different user (existence is not leaked).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#patchMissingOrForeign_ac26"
+  },
+  {
+    "id": "AC-27",
+    "fr_ref": "FR-8",
+    "layer": "backend",
+    "description": "DELETE /api/v1/wishlist/w1 with X-User-Id=owner returns HTTP 204 with empty body AND the row is removed from the DB. Valid from both Active and Purchased states.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#deleteRemovesRowBothStates_ac27"
+  },
+  {
+    "id": "AC-28",
+    "fr_ref": "FR-8",
+    "layer": "backend",
+    "description": "DELETE /api/v1/wishlist/nonexistent OR DELETE with X-User-Id != owner returns HTTP 404 with errorCode='WISHLIST_ITEM_NOT_FOUND'; DB state unchanged.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#deleteMissingOrForeign_ac28"
+  },
+  {
+    "id": "AC-29",
+    "fr_ref": "FR-9",
+    "layer": "backend",
+    "description": "WishlistErrorCode enum contains exactly the values INVALID_WISHLIST_PAYLOAD, INVALID_WISHLIST_STATUS_FILTER, INVALID_STATE_TRANSITION, USER_NOT_FOUND, FURNITURE_NOT_FOUND, WISHLIST_ITEM_NOT_FOUND (plus the optional WISHLIST_LIMIT_EXCEEDED). Every enum value has a non-null defaultMessage and an httpStatus matching the FR-9 mapping.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/wishlist/WishlistErrorCode.java"
+  },
+  {
+    "id": "AC-30",
+    "fr_ref": "FR-9",
+    "layer": "backend",
+    "description": "WishlistExceptionAdvice is annotated @RestControllerAdvice(basePackages = \"com.authenticself.wishlist\") AND @Order(Ordered.HIGHEST_PRECEDENCE) AND emits ErrorResponse(errorCode.name(), message, correlationId) — identical pattern to SpaceExceptionAdvice.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/wishlist/WishlistExceptionAdvice.java"
+  },
+  {
+    "id": "AC-31",
+    "fr_ref": "FR-11",
+    "layer": "backend",
+    "description": "WishlistService emits exactly one INFO log line per successful add / patch / delete containing the substrings op= userId= furnitureId= OR wishlistId= fromStatus= toStatus=. Error paths log WARN with errorCode= correlationId=.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistServiceTest.java#logsShape_ac31"
+  },
+  {
+    "id": "AC-32",
+    "fr_ref": "FR-12",
+    "layer": "backend",
+    "description": "application.yml contains the key app.wishlist.max-items-per-user with integer default 500. Overriding it via an environment variable WISHLIST_MAX_ITEMS_PER_USER (or Spring property override) reflects in the AC-21 truncation behaviour.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/resources/application.yml"
+  },
+  {
+    "id": "AC-33",
+    "fr_ref": "FR-13",
+    "layer": "contract",
+    "description": "artifacts/UC-02-wishlist/api_contract.yaml exists, parses as OpenAPI 3.0.x, and defines paths /api/v1/wishlist (POST, GET), /api/v1/wishlist/{wishlistId} (PATCH, DELETE). Every non-2xx response references the shared SpringErrorResponse / ErrorResponse schema shape {errorCode, message, correlationId}. The file declares the enum WishlistStatus with exactly the two values ACTIVE and PURCHASED.",
+    "verify_by": "static",
+    "target_file_or_test": "artifacts/UC-02-wishlist/api_contract.yaml"
+  },
+  {
+    "id": "AC-34",
+    "fr_ref": "FR-13",
+    "layer": "contract",
+    "description": "The api_contract.yaml enumerates every new error code (INVALID_WISHLIST_PAYLOAD, INVALID_WISHLIST_STATUS_FILTER, INVALID_STATE_TRANSITION, USER_NOT_FOUND, FURNITURE_NOT_FOUND, WISHLIST_ITEM_NOT_FOUND, MISSING_USER_HEADER) in the SpringErrorResponse.errorCode enum OR in a dedicated WishlistErrorCode enum schema.",
+    "verify_by": "static",
+    "target_file_or_test": "artifacts/UC-02-wishlist/api_contract.yaml"
+  },
+  {
+    "id": "AC-35",
+    "fr_ref": "FR-15",
+    "layer": "mobile",
+    "description": "src/mobile/src/api/wishlist.ts exports four async functions addToWishlist, listWishlist, patchWishlist, deleteWishlist with the signatures specified in FR-15. All four use the X-User-Id header and Accept: application/json; all four throw ApiError (from client.ts) on non-2xx responses.",
+    "verify_by": "static",
+    "target_file_or_test": "src/mobile/src/api/wishlist.ts"
+  },
+  {
+    "id": "AC-36",
+    "fr_ref": "FR-16",
+    "layer": "mobile",
+    "description": "In RecommendationScreen.ItemCard, tapping the '위시리스트에 추가' button (testID btn-wishlist-<furnitureId>) triggers (a) the existing analytics emit emitWishlistAddClicked({roomId, furnitureId}) AND (b) a fetch / XMLHttpRequest to POST /api/v1/wishlist with body {furnitureId:<id>, category:<item.type>, price:<item.price>} and X-User-Id header. Verified via a spy on the addToWishlist mock AND the analytics sink spy.",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/RecommendationScreen.test.tsx#btnCallsRealApi_ac36"
+  },
+  {
+    "id": "AC-37",
+    "fr_ref": "FR-16",
+    "layer": "mobile",
+    "description": "When addToWishlist resolves with alreadyExists:false and status='Active', the RN card shows toast '위시리스트에 담았어요.'. When alreadyExists:true and status='Active', toast is '이미 위시리스트에 있어요.'. When alreadyExists:true and status='Purchased', toast is '이미 구매 완료로 표시된 항목이에요.'. Each case verified by spying showToast / ToastAndroid.show / Alert.alert.",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/RecommendationScreen.test.tsx#addToastMapping_ac37"
+  },
+  {
+    "id": "AC-38",
+    "fr_ref": "FR-16",
+    "layer": "mobile",
+    "description": "When addToWishlist rejects with ApiError (errorCode=FURNITURE_NOT_FOUND or USER_NOT_FOUND), the toast is '위시리스트에 추가하지 못했어요.'. Any other rejection yields '네트워크 오류로 추가하지 못했어요.'. Screen does NOT navigate away in either case (navigation.navigate / replace / push spy receives zero calls attributable to the button).",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/RecommendationScreen.test.tsx#addErrorToastMapping_ac38"
+  },
+  {
+    "id": "AC-39",
+    "fr_ref": "FR-17",
+    "layer": "mobile",
+    "description": "src/mobile/src/screens/WishlistScreen.tsx exists. Rendered with a mocked listWishlist returning {items:[2 Active, 1 Purchased], totalActive:2, totalPurchased:1}, the screen contains the text '내 위시리스트', two tab labels containing '보관 중 (2)' and '구매 완료 (1)'. The default tab shows only the 2 Active cards.",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/WishlistScreen.test.tsx#rendersTwoTabs_ac39"
+  },
+  {
+    "id": "AC-40",
+    "fr_ref": "FR-17",
+    "layer": "mobile",
+    "description": "Each wishlist card renders furnitureSnapshot.name, '₩<toLocaleString(\"ko-KR\")>' price string, category label from CATEGORY_LABELS (책상/침대/의자/조명), and addedAt formatted as 'YYYY-MM-DD'. If furnitureSnapshot is null, the card renders '원본 상품이 삭제되었습니다.' and exposes only the 삭제 action.",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/WishlistScreen.test.tsx#cardContent_ac40"
+  },
+  {
+    "id": "AC-41",
+    "fr_ref": "FR-17",
+    "layer": "mobile",
+    "description": "Tapping the '구매 완료' button on an Active card invokes Alert.alert with the confirm prompt '구매 완료로 표시할까요?'; after tapping '확인', patchWishlist is called with {wishlistId, status:'PURCHASED'} exactly once. On success, the card moves into the '구매 완료' tab (its render node now falls under testID tab-content-purchased, is absent from testID tab-content-active).",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/WishlistScreen.test.tsx#markPurchasedFlow_ac41"
+  },
+  {
+    "id": "AC-42",
+    "fr_ref": "FR-17",
+    "layer": "mobile",
+    "description": "Tapping '보관 중으로 되돌리기' on a Purchased card confirms and calls patchWishlist with status='ACTIVE'; on success the card moves to the Active tab.",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/WishlistScreen.test.tsx#unmarkPurchasedFlow_ac42"
+  },
+  {
+    "id": "AC-43",
+    "fr_ref": "FR-17",
+    "layer": "mobile",
+    "description": "Tapping '삭제' on any card confirms via Alert.alert '위시리스트에서 삭제할까요?'; on confirm, deleteWishlist is called exactly once with {wishlistId} and the card disappears from both tabs (its testID is no longer present).",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/WishlistScreen.test.tsx#deleteFlow_ac43"
+  },
+  {
+    "id": "AC-44",
+    "fr_ref": "FR-17",
+    "layer": "mobile",
+    "description": "Empty-tab states: when totalActive=0 (mocked), the Active tab renders '아직 저장된 가구가 없어요.'; when totalPurchased=0, the Purchased tab renders '아직 구매 완료로 표시된 가구가 없어요.'.",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/WishlistScreen.test.tsx#emptyStates_ac44"
+  },
+  {
+    "id": "AC-45",
+    "fr_ref": "FR-17",
+    "layer": "mobile",
+    "description": "Loading state: with a never-resolving listWishlist mock and 500 ms of fake-timer advance, the screen renders a spinner AND the text '위시리스트를 불러오는 중이에요...'.",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/WishlistScreen.test.tsx#loadingState_ac45"
+  },
+  {
+    "id": "AC-46",
+    "fr_ref": "FR-17",
+    "layer": "mobile",
+    "description": "Error state: when listWishlist rejects, the screen renders '위시리스트를 불러오지 못했어요.' and a '다시 시도' button. Tapping it invokes listWishlist a second time. A PATCH/DELETE error with errorCode=WISHLIST_ITEM_NOT_FOUND triggers a toast '이미 삭제된 항목이에요.' and calls listWishlist again (refresh) exactly once.",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/WishlistScreen.test.tsx#errorState_ac46"
+  },
+  {
+    "id": "AC-47",
+    "fr_ref": "FR-18",
+    "layer": "mobile",
+    "description": "App.tsx RootStackParamList contains a Wishlist: undefined entry AND <Stack.Screen name=\"Wishlist\" component={WishlistScreen} options={{title: '내 위시리스트'}}/>. The existing Recommendation route entry with type { roomId; preferredStyle? } remains byte-for-byte unchanged.",
+    "verify_by": "static",
+    "target_file_or_test": "src/mobile/App.tsx"
+  },
+  {
+    "id": "AC-48",
+    "fr_ref": "FR-19",
+    "layer": "mobile",
+    "description": "HomeScreen contains a new button with label containing '위시리스트' (testID btn-open-wishlist). Tapping it calls navigation.navigate('Wishlist') exactly once. The existing primary '방 사진 업로드' / '시작하기' button still renders and is not removed.",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/HomeScreen.test.tsx#opensWishlist_ac48"
+  },
+  {
+    "id": "AC-49",
+    "fr_ref": "FR-20,UC-01-recommendation-AC-48",
+    "layer": "mobile",
+    "description": "All prior RecommendationScreen test assertions (AC-44, AC-45, AC-46, AC-47, AC-49, AC-50 of UC-01-recommendation) still pass. In particular, the emitWishlistAddClicked analytics event still fires exactly once per button tap (UC-01-recommendation AC-48 preserved), AND no additional network calls to /wishlist occur from other code paths (only the button triggers addToWishlist).",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/__tests__/RecommendationScreen.test.tsx (existing suite re-run) + ac49 assertion in the same file"
+  },
+  {
+    "id": "AC-50",
+    "fr_ref": "FR-14",
+    "layer": "backend",
+    "description": "No regression on UC-01 backend tests: full ./gradlew test run passes, including WireMock-backed SpaceControllerRecommendationsTest, V4V5FurnitureCatalogMigrationTest, PhotoUploadServiceTest, AIOrchestratorTest. Zero pre-existing test methods modified, added-only fixture setup permitted.",
+    "verify_by": "test",
+    "target_file_or_test": "src/backend/ (gradle test output)"
+  },
+  {
+    "id": "AC-51",
+    "fr_ref": "FR-14",
+    "layer": "backend",
+    "description": "SpaceController.java, SpaceExceptionAdvice.java, AIOrchestrator.java, RecommendationOrchestrator.java, AIOrchestratorExceptionAdvice.java, PhotoUploadController.java are not modified by this task (git diff shows no changes to any of these files).",
+    "verify_by": "static",
+    "target_file_or_test": "git diff / file-hash snapshot across the listed files"
+  },
+  {
+    "id": "AC-52",
+    "fr_ref": "FR-4,FR-7,FR-10",
+    "layer": "backend",
+    "description": "State-machine invariant: across all service operations (add, patch, delete), a row's status value always belongs to {'Active','Purchased'}, AND (status='Active' ⇔ purchased_at IS NULL), AND (status='Purchased' ⇔ purchased_at IS NOT NULL). Property-based test asserts this after every operation.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistStateMachineInvariantTest.java#invariantHoldsAfterEveryOp_ac52"
+  },
+  {
+    "id": "AC-53",
+    "fr_ref": "FR-9",
+    "layer": "contract",
+    "description": "Every error response emitted by the four new endpoints conforms to the shared ErrorResponse record (errorCode String UPPER_SNAKE, message String Korean, correlationId String UUIDv4-formatted). Verified by JSON-schema validation against artifacts/UC-02-wishlist/api_contract.yaml in WishlistControllerTest via MockMvc + JSON path assertions (non-2xx only).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/wishlist/WishlistControllerTest.java#errorEnvelopeShape_ac53"
+  }
+]

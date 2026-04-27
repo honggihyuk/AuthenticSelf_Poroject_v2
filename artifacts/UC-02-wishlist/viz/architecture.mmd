@@ -1,0 +1,138 @@
+%% AuthenticSelf - UC-02-wishlist: component architecture (PRD section 9 slice)
+%% Shows the public surface of the wishlist feature end-to-end:
+%%   RN screens (new + modified) -> wishlist.ts client ->
+%%   Spring Controller -> Service -> Persistence -> MySQL
+%% Every edge is annotated with the DTO / route / SQL it carries.
+%% New Task-6 modules are dashed/blue; reused Task-1/5 modules are solid grey.
+
+flowchart LR
+    classDef new       fill:#eef4ff,stroke:#1f6feb,stroke-width:2px,color:#111
+    classDef reused    fill:#f2f2f2,stroke:#999,stroke-width:1px,color:#333
+    classDef db        fill:#fff3cd,stroke:#b58a00,stroke-width:1.5px,color:#333
+    classDef contract  fill:#e7e3f4,stroke:#5b4fa3,stroke-width:1px,color:#222,stroke-dasharray: 3 3
+
+    %% ==============================================================
+    %% Client layer - React Native
+    %% ==============================================================
+    subgraph ClientRN [React Native app - src/mobile]
+        direction TB
+        Home["HomeScreen.tsx<br/>testID=btn-open-wishlist<br/>FR-19 / AC-47"]:::new
+        Rec["RecommendationScreen.tsx<br/>ItemCard.onAddToWishlist<br/>FR-16 / AC-36..AC-38"]:::new
+        Wish["WishlistScreen.tsx<br/>tabs boardgame + Active/Purchased<br/>FR-17 / AC-39..AC-46"]:::new
+        App["App.tsx<br/>Stack.Screen name='Wishlist'<br/>FR-18 / AC-47"]:::new
+        ApiWish["api/wishlist.ts<br/>addToWishlist / getWishlist /<br/>updateWishlistState / deleteWishlistItem<br/>FR-15 / AC-35"]:::new
+        ApiClient["api/client.ts<br/>ApiError envelope<br/>(reused from UC-01)"]:::reused
+        Settings["settings.ts<br/>apiBaseUrl + userId (stub auth)"]:::reused
+    end
+
+    Home -- "navigation.navigate('Wishlist')" --> App
+    App -- "render" --> Wish
+    Rec -- "addToWishlist({baseUrl,userId,furnitureId,category,price})" --> ApiWish
+    Wish -- "getWishlist / updateWishlistState /<br/>deleteWishlistItem" --> ApiWish
+    ApiWish -- "throw new ApiError(status, body)" --> ApiClient
+    ApiWish -- "baseUrl, userId" --> Settings
+
+    %% ==============================================================
+    %% Wire format - OpenAPI contract
+    %% ==============================================================
+    Contract["api_contract.yaml<br/>POST / GET / PATCH / DELETE<br/>/api/v1/wishlist<br/>SpringErrorResponse envelope<br/>FR-13 / AC-33 / AC-34"]:::contract
+
+    ApiWish == "fetch( ) with<br/>X-User-Id header,<br/>JSON body" ==> Contract
+
+    %% ==============================================================
+    %% Backend - Spring
+    %% ==============================================================
+    subgraph Backend [Spring Boot backend - src/backend]
+        direction TB
+        Ctrl["WishlistController<br/>@RestController @RequestMapping(/api/v1/wishlist)<br/>@CrossOrigin(GET,POST,PATCH,DELETE,OPTIONS)<br/>FR-5..FR-8"]:::new
+        Advice["WishlistExceptionAdvice<br/>@RestControllerAdvice basePackages=wishlist<br/>@Order(HIGHEST_PRECEDENCE)<br/>FR-9 / AC-30"]:::new
+        Err["WishlistErrorCode enum<br/>8 codes incl. MISSING_USER_HEADER,<br/>INVALID_STATE_TRANSITION,<br/>WISHLIST_ITEM_NOT_FOUND,<br/>WISHLIST_LIMIT_EXCEEDED (reserved)<br/>FR-9 / AC-29"]:::new
+        Exc["WishlistException<br/>RuntimeException(code)"]:::new
+
+        Svc["WishlistService<br/>@Service (no @Transactional)<br/>add / list / patch / delete<br/>+ record Outcome~T~<br/>FR-4 / FR-7 / FR-10 / FR-11"]:::new
+        Pers["WishlistPersistence<br/>@Component<br/>REQUIRES_NEW per DB op<br/>FR-3 / D-4"]:::new
+
+        Repo["WishlistRepository<br/>JpaRepository~Wishlist, String~<br/>5 finders: findByUserIdAndFurnitureId,<br/>findAllByUserIdAndStatusOrderByUpdatedAtDesc,<br/>findByWishlistIdAndUserId,<br/>countByUserIdAndStatus,<br/>findAllByUserIdOrderByUpdatedAtDesc<br/>FR-3 / AC-6"]:::new
+        FRepo["FurnitureRepository<br/>(reused from UC-01-recommendation)"]:::reused
+        URepo["UserRepository<br/>(reused from Task-1 DB-schema-init)"]:::reused
+
+        Ent["Wishlist @Entity<br/>wishlistId / userId / furnitureId /<br/>category / price / status /<br/>addedAt [RO] / purchasedAt [RW] /<br/>createdAt [RO] / updatedAt [RO]<br/>FR-2 / AC-5"]:::new
+        EntF["Furniture @Entity<br/>(reused)"]:::reused
+        EntU["User @Entity<br/>(reused)"]:::reused
+
+        Cfg["application.yml<br/>app.wishlist.max-items-per-user: 500<br/>FR-12 / AC-32"]:::new
+    end
+
+    Contract == "HTTP 1.1, application/json" ==> Ctrl
+
+    Ctrl -- "add(userId, AddWishlistRequest)" --> Svc
+    Ctrl -- "list(userId, statusFilterRaw)" --> Svc
+    Ctrl -- "patch(userId, wishlistId, targetStatus)" --> Svc
+    Ctrl -- "delete(userId, wishlistId)" --> Svc
+    Ctrl -. "throw WishlistException" .-> Advice
+    Advice -- "handleWishlist, handleMissingHeader,<br/>handleUnreadable -> ErrorResponse" --> Ctrl
+    Advice -- "WishlistErrorCode.name(), defaultMessage()" --> Err
+    Exc --> Err
+
+    Svc -- "userExists / findFurniture /<br/>findByUserIdAndFurnitureId /<br/>findByWishlistIdAndUserId /<br/>insert / updateStatus / deleteById /<br/>list(ListSnapshot) / findFurnitureByIds" --> Pers
+    Svc -. "@Value app.wishlist.max-items-per-user" .-> Cfg
+    Svc -. "throws WishlistException" .-> Advice
+
+    Pers -- "wishlists.*" --> Repo
+    Pers -- "furniture.*" --> FRepo
+    Pers -- "users.existsById" --> URepo
+    Pers -- "em.refresh(saved)" --> Ent
+
+    Repo -- "maps" --> Ent
+    FRepo -- "maps" --> EntF
+    URepo -- "maps" --> EntU
+
+    %% ==============================================================
+    %% Data layer - MySQL
+    %% ==============================================================
+    subgraph Data [MySQL 8]
+        direction TB
+        TblW[("wishlist table<br/>PK wishlist_id<br/>FK user_id, furniture_id<br/>status ENUM, added_at, purchased_at,<br/>created_at, updated_at<br/>uq_wishlist_user_furniture UNIQUE (V6)<br/>FR-1 / AC-1..AC-4")]:::db
+        TblF[("furniture table<br/>(UC-01-recommendation V4 + V5 seed)")]:::db
+        TblU[("users table<br/>(Task-1 V1)")]:::db
+        Mig["db/migration/V6__extend_wishlist_timestamps.sql<br/>ADD added_at, purchased_at, UNIQUE index<br/>FR-1 / AC-1..AC-3 / AC-51"]:::new
+        MigPrev["V1..V5 migrations (immutable)<br/>FR-14 / AC-4 / AC-51"]:::reused
+    end
+
+    Ent -. "@Table(name='wishlist')" .-> TblW
+    EntF -. "@Table(name='furniture')" .-> TblF
+    EntU -. "@Table(name='users')" .-> TblU
+    Mig --> TblW
+    MigPrev --> TblW
+    MigPrev --> TblF
+    MigPrev --> TblU
+
+    %% ==============================================================
+    %% Legend
+    %% ==============================================================
+    subgraph Legend [Legend]
+        direction LR
+        L1["NEW (Task-6 UC-02-wishlist)"]:::new
+        L2["REUSED (Task-1 / Task-5)"]:::reused
+        L3["DB table or SQL migration"]:::db
+        L4["Wire contract"]:::contract
+    end
+
+    %% FR/AC anchor notes:
+    %%   FR-1  V6 migration               -> Mig + TblW
+    %%   FR-2  Wishlist entity extension  -> Ent
+    %%   FR-3  WishlistRepository         -> Repo
+    %%   FR-4  idempotent add             -> Svc + Pers + TblW UNIQUE
+    %%   FR-5..FR-8  REST endpoints       -> Ctrl
+    %%   FR-9  error envelope / advice    -> Advice + Err
+    %%   FR-10 state machine              -> Svc.patch
+    %%   FR-11 INFO logging               -> Svc.log.info
+    %%   FR-12 app.wishlist.max-items...  -> Cfg
+    %%   FR-13 OpenAPI                    -> Contract
+    %%   FR-14 no regression              -> MigPrev + reused beans
+    %%   FR-15 RN client                  -> ApiWish
+    %%   FR-16 RecommendationScreen wire  -> Rec -> ApiWish
+    %%   FR-17 WishlistScreen             -> Wish
+    %%   FR-18 Navigation                 -> App
+    %%   FR-19 HomeScreen entry           -> Home
+    %%   FR-20 no RN regression           -> Rec edge preserves emitWishlistAddClicked before addToWishlist

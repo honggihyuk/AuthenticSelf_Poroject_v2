@@ -1,0 +1,92 @@
+%% AuthenticSelf - UC-01-photo-upload: End-to-end sequence
+%% Source of truth:
+%%   src/mobile/src/screens/UploadScreen.tsx
+%%   src/mobile/src/api/client.ts
+%%   src/backend/src/main/java/com/authenticself/controller/PhotoUploadController.java
+%%   src/backend/src/main/java/com/authenticself/service/PhotoUploadService.java
+%%   src/backend/src/main/java/com/authenticself/storage/local/LocalFileSystemObjectStorageService.java
+%%   src/backend/src/main/resources/db/migration/V2__add_spaces_status_and_photo.sql
+%% PRD refs: PRD section 6 UC-01 step 1 (basic flow), PRD section 6 UC-01 alt-flow 1-a,
+%%           PRD section 8 (sequence style), PRD section 9 (architecture).
+
+sequenceDiagram
+    autonumber
+    actor U  as User
+    participant RN as UploadScreen (RN)<br/>UploadScreen.tsx
+    participant Ax as API Client<br/>api/client.ts (XHR)
+    participant Ct as PhotoUploadController<br/>@RestController
+    participant Sv as PhotoUploadService<br/>@Service
+    participant OS as ObjectStorageService<br/>LocalFileSystem impl
+    participant SR as SpaceRepository<br/>JpaRepository
+    participant DB as MySQL spaces table<br/>(V2 schema)
+
+    U->>RN: tap "방 사진 하나로 가구 추천" then pick image (FR-7 / AC-17)
+    RN->>RN: validate asset has uri, mimeType, fileName (FR-7)
+    U->>RN: tap "업로드"
+    RN->>Ax: uploadPhoto({baseUrl, userId, uri, mimeType, fileName}) (FR-7 / AC-18)
+    Ax->>Ct: POST /api/v1/spaces/photo<br/>multipart/form-data + X-User-Id (FR-1 / AC-20)
+
+    Note over Ct: 1) header check FIRST<br/>2) file-presence check (design section 2, controller-side ordering)
+    Ct->>Sv: upload(userId, contentType, originalFilename, bytes) (FR-1)
+
+    Note over Sv: FR-2 pipeline:<br/>user exists? -> MIME allow-list -> size -> ImageIO decode -> resolution
+    Sv->>SR: users.existsById(userId) (FR-4 / AC-9)
+    SR-->>Sv: true
+
+    Sv->>Sv: build roomId (UUID) + objectKey spaces/{yyyy}/{MM}/{dd}/{roomId}.{ext} (FR-3 / AC-16)
+
+    Sv->>OS: upload(objectKey, bytes, contentType) (FR-3)
+    OS-->>Sv: PutResult(objectKey, file:// url, sizeBytes)
+
+    alt DB insert succeeds (happy path - FR-4 / AC-6)
+        Sv->>SR: spaces.save(Space{status=PENDING_ANALYSIS, photoUrl, uploadedAt, ...})
+        SR->>DB: INSERT INTO spaces (...)
+        DB-->>SR: 1 row inserted
+        SR-->>Sv: persisted entity
+        Sv->>Sv: log INFO roomId, userId, contentType, size, elapsedMs (FR-9)
+        Sv-->>Ct: UploadPhotoResponse(roomId, uploadUrl, "PENDING_ANALYSIS")
+        Ct-->>Ax: 201 Created + JSON body (FR-1 / AC-6)
+        Ax-->>RN: UploadSuccess
+        RN->>RN: navigation.replace("Analyzing", {roomId}) (FR-7 / AC-18)
+        RN-->>U: AnalyzingScreen with roomId
+    else DB insert fails (FR-5 / AC-14 compensating delete)
+        Sv->>SR: spaces.save(...)
+        SR->>DB: INSERT (fails)
+        DB-->>SR: DataAccessException
+        SR-->>Sv: throws
+        Sv->>OS: delete(objectKey) (compensating - FR-5)
+        OS-->>Sv: (idempotent - ok even if already gone)
+        Sv->>Sv: log ERROR + throw UploadException(STORAGE_PERSIST_FAILED) (FR-9)
+        Sv-->>Ct: UploadException
+        Ct-->>Ax: 500 + ErrorResponse{STORAGE_PERSIST_FAILED} (FR-6 / AC-14)
+        Ax-->>RN: UploadFailedError
+        RN-->>U: Alert "업로드 실패" with 다시 시도 button (FR-7)
+    else Validation fails e.g. RESOLUTION_TOO_LOW (FR-2 / AC-13 - UC-01 alt-flow 1-a)
+        Note over Sv: ImageIO.read returns 500x500 BufferedImage<br/>width<640 or height<480
+        Sv->>Sv: throw UploadException(RESOLUTION_TOO_LOW)
+        Sv-->>Ct: UploadException
+        Ct-->>Ax: 422 + ErrorResponse{RESOLUTION_TOO_LOW, msg, correlationId} (FR-6)
+        Ax-->>RN: UploadFailedError(httpStatus=422, body.errorCode=RESOLUTION_TOO_LOW)
+        RN->>RN: messageForCode("RESOLUTION_TOO_LOW") -> Korean message (FR-7 / AC-19)
+        RN-->>U: Alert with "업로드한 사진의 해상도가 너무 낮습니다..."
+    end
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% Steps 1-4    : RN pick + preview + submit .................... FR-7, AC-17, AC-18
+%% Step 5       : HTTP contract (multipart + X-User-Id) ......... FR-1, AC-20
+%% Steps 6-7    : Controller ordering (header then file) ........ design section 2, AC-8
+%% Step 8       : Caller-existence check ........................ FR-4, AC-9
+%% Step 9       : objectKey layout .............................. FR-3, AC-16
+%% Step 10-11   : Object-storage write .......................... FR-3, AC-15
+%% Happy path   : DB insert + 201 response ...................... FR-4, AC-6
+%% alt branch 1 : Compensating delete on DB failure ............. FR-5, AC-14
+%% alt branch 2 : Validation failure example .................... FR-2, AC-13,
+%%                (maps UC-01 alt-flow 1-a at upload time)       spec section 2 / PRD section 6
+%%
+%% Error-code envelope shape (FR-6):
+%%   { errorCode, message, correlationId } - handled by UploadExceptionAdvice.
+%% All 8 codes (EMPTY_FILE, MISSING_USER_HEADER, UNKNOWN_USER,
+%% UNSUPPORTED_MEDIA_TYPE, FILE_TOO_LARGE, IMAGE_UNREADABLE,
+%% RESOLUTION_TOO_LOW, STORAGE_PERSIST_FAILED) route through the same envelope.

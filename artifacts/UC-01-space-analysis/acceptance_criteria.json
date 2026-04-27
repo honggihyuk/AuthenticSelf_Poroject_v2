@@ -1,0 +1,195 @@
+{
+  "taskId": "UC-01-space-analysis",
+  "specPath": "artifacts/UC-01-space-analysis/spec.md",
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "given": "the repository",
+      "when": "listing src/ai/",
+      "then": "the directory exists with at least app/main.py, app/analyzers/base.py, and either pyproject.toml or requirements.txt",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-2",
+      "given": "src/ai/pyproject.toml or src/ai/requirements.txt",
+      "when": "scanning the runtime dependency section",
+      "then": "none of ultralytics, mediapipe, torch, tensorflow, or layoutnet appear; fastapi, uvicorn, pydantic (>=2), numpy, opencv-python-headless, and pillow all do appear",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-3",
+      "given": "the Python service started via uvicorn app.main:app --port 8001",
+      "when": "GET /health is called",
+      "then": "response is HTTP 200 and JSON body matches {status:'ok', service:'space-analysis', version:<non-empty string>}",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-4",
+      "given": "a real 1920x1080 JPEG saved under the AI photo-root and the service is up",
+      "when": "POST /analyze/space is called with {roomId:'test-ac4', photoUrl:'file://<absolute>'}",
+      "then": "response is HTTP 200; body fields conform: roomId=='test-ac4', status=='OK', dimensions.widthM in [2.5,6.0], dimensions.lengthM in [2.5,6.0], dimensions.heightM==2.4, dimensions.areaM2 == round(widthM*lengthM,2), mainColor matches ^#[0-9A-F]{6}$, confidence in [0.0,1.0], processingMs > 0",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-5",
+      "given": "the same test JPEG",
+      "when": "POST /analyze/space is called twice with identical request bodies",
+      "then": "both responses have identical dimensions, mainColor, and confidence (only processingMs may differ)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-6",
+      "given": "a photoUrl pointing to a path that does not exist",
+      "when": "POSTed to /analyze/space",
+      "then": "response is HTTP 422 with JSON body errorCode=='IMAGE_NOT_FOUND' and roomId echoed",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-7",
+      "given": "a file on disk whose bytes are NOT a valid image (e.g., a text file renamed to .jpg)",
+      "when": "POSTed to /analyze/space",
+      "then": "response is HTTP 422 with JSON body errorCode=='IMAGE_READ_FAILED'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-8",
+      "given": "a request body missing roomId OR whose photoUrl does not start with file://",
+      "when": "POSTed to /analyze/space",
+      "then": "response is HTTP 422 and errorCode=='INVALID_REQUEST'",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-9",
+      "given": "the env var AI_PHOTO_ROOT points to <root>",
+      "when": "photoUrl resolves to a path outside that root (e.g. via .. traversal)",
+      "then": "response is HTTP 422 with errorCode=='IMAGE_NOT_FOUND' (not INTERNAL_ERROR) and the file is NOT read",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-10",
+      "given": "the source file registering POST /analyze/space",
+      "when": "scanning for the handler definition",
+      "then": "it is declared with async def AND the analyzer invocation uses asyncio.to_thread, loop.run_in_executor, or starlette.concurrency.run_in_threadpool",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-11",
+      "given": "src/ai/app/analyzers/",
+      "when": "listed",
+      "then": "base.py defines SpaceAnalyzer as a Protocol or ABC with an analyze(image_path) method; concrete classes DimensionsEstimator, ColorExtractor, StyleClassifier each exist in their own module; each has a docstring naming it placeholder (Dimensions/Style) or real (Color)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-12",
+      "given": "src/ai/app/analyzers/color_extractor.py",
+      "when": "inspected",
+      "then": "the file imports cv2 AND calls cv2.kmeans( AND returns a hex color matching ^#[0-9A-F]{6}$",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-13",
+      "given": "src/ai/app/main.py",
+      "when": "grepped for TODO(task-4)",
+      "then": "at least one match exists AND the string /analyze/style appears in a comment",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-14",
+      "given": "the Python service up",
+      "when": "GET /openapi.json is fetched",
+      "then": "the paths object contains /analyze/space and /health but NOT /analyze/style",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-15",
+      "given": "src/backend/src/main/java/com/authenticself/ai/",
+      "when": "listed",
+      "then": "files AIOrchestrator.java, SpaceAnalysisClient.java, AIOrchestratorController.java, and a DTO folder (dto/) with SpaceAnalysisRequest.java and SpaceAnalysisResponse.java all exist",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-16",
+      "given": "a spaces row with roomId='r1', status='PENDING_ANALYSIS', a real photo at photo_url, and the Python service (or WireMock returning the AC-4 success body) available",
+      "when": "POST /internal/v1/spaces/r1/analyze is called",
+      "then": "response is HTTP 200 with status=='ANALYZED'; the spaces row now has status='ANALYZED', non-null dimensions matching ^\\d+(\\.\\d+)?x\\d+(\\.\\d+)?x\\d+(\\.\\d+)?m$, non-null main_color matching ^#[0-9A-F]{6}$, and non-null analysis_date; style is still NULL",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-17",
+      "given": "a spaces row with status='ANALYZED'",
+      "when": "POST /internal/v1/spaces/{roomId}/analyze is called",
+      "then": "response is HTTP 200 with skipped==true and reason=='NOT_PENDING'; the Python service MUST NOT have been called (verify via WireMock request count == 0); the DB row is unchanged",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-18",
+      "given": "a PENDING row and a mocked Python service returning the IMAGE_READ_FAILED body",
+      "when": "the orchestrator runs",
+      "then": "Spring response is HTTP 422 with errorCode=='ANALYSIS_IMAGE_READ_FAILED'; the spaces row now has status='FAILED' and a non-null analysis_date; dimensions and main_color remain NULL",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-19",
+      "given": "a PENDING row and a Python service that is unreachable (no WireMock stub, port closed)",
+      "when": "the orchestrator runs",
+      "then": "Spring response is HTTP 502 with errorCode=='AI_SERVICE_UNAVAILABLE'; the spaces row status is STILL PENDING_ANALYSIS; analysis_date is still NULL",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-20",
+      "given": "no spaces row with room_id='nope'",
+      "when": "POST /internal/v1/spaces/nope/analyze is called",
+      "then": "response is HTTP 404 with errorCode=='SPACE_NOT_FOUND'; no HTTP call is made to the Python service",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-21",
+      "given": "src/backend/src/main/resources/application.yml",
+      "when": "parsed",
+      "then": "keys app.ai.space.base-url, app.ai.space.connect-timeout-ms, app.ai.space.read-timeout-ms, app.ai.poller.enabled, app.ai.poller.interval-ms are all present with defaults http://localhost:8001, 2000, 10000, true, 15000 respectively",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-22",
+      "given": "the Spring test profile",
+      "when": "the context starts",
+      "then": "either app.ai.poller.enabled=false is set in the test configuration OR AIAnalysisPoller is annotated @ConditionalOnProperty(name='app.ai.poller.enabled', havingValue='true') (verifiable by inspecting the source)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-23",
+      "given": "the backend source tree",
+      "when": "grepping src/backend/src/main/java/**/*.java",
+      "then": "zero matches for java.net.HttpURLConnection outside test sources; zero matches for ultralytics, mediapipe, torch (Python libs must not leak into a Java string literal)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-24",
+      "given": "SpaceAnalysisClient.java",
+      "when": "inspecting its public method(s)",
+      "then": "callSpaceAnalysis(String roomId, String photoUrl) takes exactly those two parameters and returns a DTO (no Spring-web-specific types like ResponseEntity in the signature), enabling parallel invocation via CompletableFuture.supplyAsync in Task 4",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-25",
+      "given": "the artifact artifacts/UC-01-space-analysis/api_contract.yaml",
+      "when": "parsed as OpenAPI 3.0.x",
+      "then": "it defines both (a) the Python POST /analyze/space with request schema {roomId, photoUrl} and success schema {roomId, status, dimensions{widthM,lengthM,heightM,areaM2}, mainColor, confidence, processingMs}, and (b) the Spring POST /internal/v1/spaces/{roomId}/analyze; both error envelopes are defined as shared schemas; responses include 200, 422, 502 (Spring), 404 (Spring), and 500",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-26",
+      "given": "the repo at this task's merge",
+      "when": "listing src/backend/src/main/resources/db/migration/",
+      "then": "no V3__*.sql file was added by this task (V3 is reserved for a later task)",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-27",
+      "given": "the full verification suite",
+      "when": "re-running UC-01-photo-upload's AC-1..AC-22",
+      "then": "all previously-passing ACs still pass (no behavior change to the upload endpoint, error envelope, or object-storage abstraction)",
+      "test_type": "integration"
+    }
+  ]
+}

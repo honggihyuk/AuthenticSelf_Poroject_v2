@@ -1,0 +1,312 @@
+openapi: 3.0.3
+info:
+  title: AuthenticSelf — UC-01-style-selection API
+  version: 0.4.0
+  description: |
+    Combined OpenAPI for the new endpoints introduced by
+    `UC-01-style-selection` (Task 4):
+      * Python AI — `POST /analyze/style`
+      * Spring backend — `GET /api/v1/spaces/{roomId}` and
+        `PUT /api/v1/spaces/{roomId}/preferred-style`
+
+    The space-analysis Python route, the internal Spring analyze trigger
+    and the photo-upload endpoint are documented in their respective
+    Task-2/Task-3 contracts and are NOT repeated here.
+
+servers:
+  - url: http://localhost:8001
+    description: Python AI FastAPI service
+  - url: http://localhost:8080
+    description: Spring backend
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+paths:
+
+  # ===== Python AI service =============================================
+  /analyze/style:
+    post:
+      summary: Classify the uploaded room photo into one of five styles.
+      operationId: analyzeStyle
+      tags: [AI]
+      servers:
+        - url: http://localhost:8001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StyleAnalyzeRequest'
+      responses:
+        '200':
+          description: Successful classification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StyleAnalysisResponse'
+        '422':
+          description: Validation / IO failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiErrorEnvelope'
+        '500':
+          description: Unexpected internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiErrorEnvelope'
+
+  # ===== Spring public endpoints =======================================
+  /api/v1/spaces/{roomId}:
+    get:
+      summary: Fetch the current state of a space (for the RN polling loop).
+      operationId: getSpace
+      tags: [Spaces]
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{1,64}$'
+        - name: X-User-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Current state of the space.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpaceStateResponse'
+        '400':
+          description: Missing X-User-Id header.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorEnvelope'
+        '403':
+          description: X-User-Id does not match the space's owner.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorEnvelope'
+        '404':
+          description: No row for the given roomId.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorEnvelope'
+
+  /api/v1/spaces/{roomId}/preferred-style:
+    put:
+      summary: Set the user's chosen target style for the recommendation pass.
+      operationId: setPreferredStyle
+      tags: [Spaces]
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{1,64}$'
+        - name: X-User-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPreferredStyleRequest'
+      responses:
+        '200':
+          description: Updated state of the space.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpaceStateResponse'
+        '400':
+          description: Missing header or invalid preferredStyle value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorEnvelope'
+        '403':
+          description: X-User-Id does not match the space's owner.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorEnvelope'
+        '404':
+          description: No row for the given roomId.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorEnvelope'
+        '409':
+          description: Space status is not ANALYZED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorEnvelope'
+
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
+
+components:
+
+  schemas:
+
+    # ---------- enums ------------------------------------------------
+    Style:
+      description: AI-output style. `CURRENT` is a user-only choice and NEVER appears here.
+      type: string
+      enum: [MODERN, SIMPLE, CLASSIC, SCANDINAVIAN, INDUSTRIAL]
+
+    PreferredStyle:
+      description: User-choice style (superset of Style by CURRENT).
+      type: string
+      enum: [CURRENT, MODERN, SIMPLE, CLASSIC, SCANDINAVIAN, INDUSTRIAL]
+
+    SpaceStatus:
+      type: string
+      enum: [PENDING_ANALYSIS, ANALYZED, FAILED]
+
+    # ---------- Python — /analyze/style ------------------------------
+    StyleAnalyzeRequest:
+      type: object
+      required: [roomId, photoUrl]
+      additionalProperties: false
+      properties:
+        roomId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[A-Za-z0-9_-]+$'
+        photoUrl:
+          type: string
+          pattern: '^file://.+'
+          minLength: 8
+          maxLength: 2048
+
+    StyleAnalysisResponse:
+      type: object
+      required: [roomId, status, style, confidence, scores, processingMs]
+      additionalProperties: false
+      properties:
+        roomId: { type: string }
+        status: { type: string, enum: [OK] }
+        style:  { $ref: '#/components/schemas/Style' }
+        confidence:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        scores:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+          description: Map with exactly five keys — one per Style enum value. Sum in [0.99, 1.01].
+          example:
+            MODERN:       0.72
+            SIMPLE:       0.12
+            CLASSIC:      0.06
+            SCANDINAVIAN: 0.07
+            INDUSTRIAL:   0.03
+        processingMs:
+          type: integer
+          minimum: 1
+
+    AiErrorEnvelope:
+      type: object
+      required: [errorCode, message]
+      additionalProperties: false
+      properties:
+        errorCode:
+          type: string
+          enum:
+            - INVALID_REQUEST
+            - IMAGE_NOT_FOUND
+            - IMAGE_READ_FAILED
+            - ANALYSIS_FAILED
+            - INTERNAL_ERROR
+        message: { type: string }
+        roomId:
+          type: string
+          nullable: true
+
+    # ---------- Spring — /api/v1/spaces ------------------------------
+    SpaceStateResponse:
+      type: object
+      required: [roomId, status]
+      properties:
+        roomId:          { type: string }
+        status:          { $ref: '#/components/schemas/SpaceStatus' }
+        dimensions:      { type: string, nullable: true, example: "3.6x4.2x2.4m" }
+        mainColor:       { type: string, nullable: true, pattern: '^#[0-9A-F]{6}$' }
+        style:
+          oneOf:
+            - { $ref: '#/components/schemas/Style' }
+            - type: string
+              nullable: true
+          nullable: true
+        styleConfidence:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          nullable: true
+        preferredStyle:
+          oneOf:
+            - { $ref: '#/components/schemas/PreferredStyle' }
+            - type: string
+              nullable: true
+          nullable: true
+        analysisDate:
+          type: string
+          format: date-time
+          nullable: true
+        uploadedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    SetPreferredStyleRequest:
+      type: object
+      required: [preferredStyle]
+      additionalProperties: false
+      properties:
+        preferredStyle:
+          $ref: '#/components/schemas/PreferredStyle'
+
+    SpringErrorEnvelope:
+      type: object
+      required: [errorCode, message, correlationId]
+      properties:
+        errorCode:
+          type: string
+          enum:
+            - MISSING_USER_HEADER
+            - SPACE_NOT_FOUND
+            - SPACE_ACCESS_DENIED
+            - INVALID_PREFERRED_STYLE
+            - ANALYSIS_NOT_READY
+            - AI_SERVICE_UNAVAILABLE
+            - ANALYSIS_FAILED
+            - ANALYSIS_IMAGE_NOT_FOUND
+            - ANALYSIS_IMAGE_READ_FAILED
+        message:       { type: string }
+        correlationId: { type: string, format: uuid }

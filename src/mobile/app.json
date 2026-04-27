@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "AuthenticSelf",
+    "slug": "authenticself",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": ["**/*"],
+    "ios": { "supportsTablet": true },
+    "android": { "package": "com.authenticself.app" },
+    "web": { "bundler": "metro" },
+    "extra": {
+      "apiBaseUrl": "http://localhost:8080"
+    }
+  }
+}

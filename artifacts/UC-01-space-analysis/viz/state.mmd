@@ -1,0 +1,72 @@
+%% AuthenticSelf - UC-01-space-analysis: spaces.status lifecycle (UPDATED from Task 2)
+%%
+%% Previous snapshot: artifacts/UC-01-photo-upload/viz/state.mmd
+%%   Task 2 implemented only [*] -> PENDING_ANALYSIS.
+%%   PENDING_ANALYSIS -> ANALYZED / FAILED were marked FUTURE.
+%%
+%% THIS TASK (UC-01-space-analysis / Task 3) implements BOTH outgoing transitions
+%% plus the transport-retry self-loop and the ANALYZED-idempotent self-loop.
+%%
+%% Source of truth:
+%%   src/backend/src/main/java/com/authenticself/ai/AIOrchestrator.java
+%%   src/backend/src/main/java/com/authenticself/ai/SpaceAnalysisPersistence.java
+%%   src/backend/src/main/java/com/authenticself/ai/AnalysisPoller.java
+%%   src/backend/src/main/java/com/authenticself/ai/SpaceAnalysisClient.java
+%%   src/backend/src/main/java/com/authenticself/domain/Space.java (Status enum)
+
+stateDiagram-v2
+    [*] --> PENDING_ANALYSIS : POST /api/v1/spaces/photo (201)<br/>PhotoUploadService.upload()<br/>Task 2 FR-4 / AC-6 (IMPLEMENTED - unchanged)
+
+    PENDING_ANALYSIS --> ANALYZED : Python 200 OK<br/>SpaceAnalysisPersistence.markAnalyzed(...)<br/>sets dimensions / main_color / analysis_date<br/>Task 3 FR-12 step 4 / AC-16 (NOW IMPLEMENTED)
+
+    PENDING_ANALYSIS --> FAILED : Python 422 analyzer error<br/>(IMAGE_NOT_FOUND / IMAGE_READ_FAILED /<br/>ANALYSIS_FAILED / INVALID_REQUEST)<br/>SpaceAnalysisPersistence.markFailed(...)<br/>Task 3 FR-12 step 5 / AC-18 (NOW IMPLEMENTED)
+
+    PENDING_ANALYSIS --> PENDING_ANALYSIS : Transport failure (connect/read timeout,<br/>ConnectException, unparseable 5xx)<br/>NO DB write - poller retries next tick<br/>Task 3 FR-15 / AC-19 (NOW IMPLEMENTED)
+
+    ANALYZED --> ANALYZED : Re-trigger on already-ANALYZED row<br/>AIOrchestrator short-circuits - no Python call, no DB write<br/>returns {skipped:true, reason:"NOT_PENDING"}<br/>Task 3 FR-12 step 2 / AC-17 (NOW IMPLEMENTED)
+
+    FAILED --> FAILED : Re-trigger on already-FAILED row<br/>same short-circuit path as ANALYZED<br/>Task 3 FR-12 step 2 (IMPLEMENTED)
+
+    ANALYZED --> [*] : terminal for this state machine<br/>(row is consumed by recommendation / wishlist)
+    FAILED   --> [*] : terminal - user must re-upload<br/>(RN surfaces "재업로드 요청" - PRD section 6 alt-flow 1-a)
+
+    note right of PENDING_ANALYSIS
+        Row lives here after upload (Task 2)
+        AND after any transport-level failure
+        during analysis (Task 3 FR-15 / AC-19).
+        The AnalysisPoller sweeps this state
+        every 15s (app.ai.poller.interval-ms).
+    end note
+
+    note right of ANALYZED
+        dimensions: "WxLxHm" string (AC-16 regex)
+        main_color: "#RRGGBB"
+        analysis_date: UTC timestamp
+        style: STILL NULL (Task 4 writes it).
+        Short-circuit re-entry returns HTTP 200
+        with skipped=true, reason=NOT_PENDING.
+    end note
+
+    note right of FAILED
+        dimensions / main_color stay NULL.
+        analysis_date is set so ops can see
+        when the failure occurred.
+        Same short-circuit behaviour as ANALYZED.
+    end note
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% [*] -> PENDING_ANALYSIS .................... Task 2 FR-4 / AC-6 (unchanged)
+%% PENDING_ANALYSIS -> ANALYZED ............... Task 3 FR-12 step 4 / AC-16  NOW IMPLEMENTED
+%% PENDING_ANALYSIS -> FAILED ................. Task 3 FR-12 step 5 / AC-18  NOW IMPLEMENTED
+%% PENDING_ANALYSIS -> PENDING_ANALYSIS ....... Task 3 FR-15 / AC-19         NOW IMPLEMENTED
+%%                                              (transport retry - no DB write)
+%% ANALYZED -> ANALYZED (self) ................ Task 3 FR-12 step 2 / AC-17  NOW IMPLEMENTED
+%%                                              (short-circuit idempotency)
+%% FAILED   -> FAILED   (self) ................ Task 3 FR-12 step 2          IMPLEMENTED
+%%                                              (short-circuit idempotency)
+%%
+%% OUT OF SCOPE at this task:
+%%   spaces.style column writes -> Task 4 (UC-01-style-selection).
+%%   A FAILED -> PENDING_ANALYSIS manual retry endpoint -> future ops task.

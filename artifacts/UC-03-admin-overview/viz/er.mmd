@@ -1,0 +1,107 @@
+%% AuthenticSelf - UC-03-admin-overview: ER slice for the four admin-read tables
+%% Anchors: FR-1 (V7 users.role) / FR-9 (aggregation queries) / AC-1..AC-6 / PRD section 7.
+%%
+%% V7 delta on users (FR-1 / AC-2 / AC-3 / AC-4):
+%%   + role ENUM('USER','ADMIN') NOT NULL DEFAULT 'USER'   (AFTER email)
+%%   + idx_users_role (role)
+%%
+%% Admin aggregation queries read (but never mutate) all four tables.
+%% "Read/Write" legend below reflects the admin-package access pattern -
+%% not the global lifetime of each column. Sibling tasks (Task-1..6)
+%% own the write path for every column outside users.role.
+%%
+%% Column access legend:
+%%   [AR]  READ by AdminOverviewRepository @Query
+%%   [AW]  WRITTEN by V7 / the admin package (only users.role - new in Task-7)
+%%   [OW]  WRITTEN by other tasks (Task-1..6); admin package only reads
+%%   [PK]  primary key
+%%   [FK]  foreign key
+%%   [IX]  indexed column (new index added in this task: idx_users_role)
+%%
+%% Sources of truth:
+%%   src/backend/src/main/resources/db/migration/V7__add_users_role.sql    (NEW)
+%%   src/backend/src/main/java/com/authenticself/domain/User.java          (EXTENDED)
+%%   src/backend/src/main/java/com/authenticself/admin/AdminOverviewRepository.java
+%%   src/backend/src/main/resources/db/migration/V1..V6*.sql               (READ-ONLY here)
+
+erDiagram
+
+    USERS ||--o{ SPACES    : "user_id FK (reused Task-1)"
+    USERS ||--o{ WISHLIST  : "user_id FK (reused Task-1)"
+    FURNITURE ||--o{ WISHLIST : "furniture_id FK (reused Task-1)"
+
+    USERS {
+        string   user_id        PK "[AR] VARCHAR(64) - Task-1 V1"
+        string   name              "[OW] Task-1 V1 - NEVER logged by admin (AC-41)"
+        string   email             "[OW] Task-1 V1 UNIQUE - NEVER logged by admin (AC-41)"
+        string   role              "[AR][AW][IX] ENUM('USER','ADMIN') NOT NULL DEFAULT 'USER'<br/>NEW in V7 - AFTER email position"
+        datetime created_at        "[AR] Task-1 V1 DEFAULT CURRENT_TIMESTAMP<br/>window filter dim for Users.newSignups + signupsByDay"
+        datetime updated_at        "[OW] Task-1 V1 ON UPDATE CURRENT_TIMESTAMP"
+    }
+
+    SPACES {
+        string   room_id        PK "[OW] Task-1 V1"
+        string   user_id        FK "[AR] Task-1 V1 - DISTINCT in Users.activeUsers"
+        string   main_color        "[AR] UC-01-space-analysis - top-N in Rooms.mainColorTop5<br/>NULL colors excluded from bucket"
+        string   style             "[AR] UC-01-space-analysis - Rooms.styleDistribution<br/>NULL styles excluded from bucket (AC-35)"
+        string   status            "[AR] UC-01-photo-upload V2 - Rooms.statusDistribution<br/>key set == Space.Status.values() (AC-16 / AC-34)"
+        datetime uploaded_at       "[AR] Task-2 V2 - window filter dim for Rooms + Users.activeUsers"
+        datetime analysis_date     "[OW] UC-01-space-analysis - NOT used as filter dim (design §6.2)"
+    }
+
+    WISHLIST {
+        string   wishlist_id    PK "[OW] Task-6 V6"
+        string   user_id        FK "[OW] Task-6 V6"
+        string   furniture_id   FK "[OW] Task-6 V6 - referenced by FK RESTRICT"
+        string   category          "[AR] ENUM-valued {desk,bed,chair,lighting}<br/>Wishlist.categoryDistribution + Sales.salesByCategory"
+        int      price             "[AR] Task-6 V6 - SNAPSHOT at add-time<br/>Sales.totalSalesKrw uses THIS value, NOT furniture.price (AC-23)"
+        string   status            "[AR] ENUM('Active','Purchased') - Wishlist.statusDistribution<br/>Sales aggregates filter on status='Purchased'<br/>DB casing translated to UPPER_SNAKE in service (FR-7)"
+        datetime added_at          "[AR] Task-6 V6 - window filter dim for Wishlist tile"
+        datetime purchased_at      "[AR] Task-6 V6 - window filter dim for Sales tile<br/>NULL when Active (AC-24 excludes Active rows)"
+        datetime created_at        "[OW] Task-1 V1"
+        datetime updated_at        "[OW] Task-1 V1"
+    }
+
+    FURNITURE {
+        string   furniture_id   PK "[OW] Task-1 V1"
+        string   type              "[OW] UC-01-recommendation V4"
+        int      price             "[OW] NOT read by admin aggregations (AC-23 uses wishlist.price)"
+        string   name              "[OW] UC-01-recommendation V4"
+    }
+
+    %% ==================================================================
+    %% Constraints (Mermaid has no native syntax - recorded as comments)
+    %% ==================================================================
+    %% PRIMARY KEYS:
+    %%   users.user_id / spaces.room_id / wishlist.wishlist_id / furniture.furniture_id
+    %%
+    %% FOREIGN KEYS (inherited from Task-1 V1 + Task-2 V2):
+    %%   spaces.user_id       REFERENCES users(user_id)          ON DELETE CASCADE
+    %%   wishlist.user_id     REFERENCES users(user_id)          ON DELETE CASCADE
+    %%   wishlist.furniture_id REFERENCES furniture(furniture_id) ON DELETE RESTRICT
+    %%
+    %% INDEXES (V7 adds one):
+    %%   + idx_users_role (users.role)   - NEW in V7 (FR-1 / AC-2)
+    %%
+    %% WINDOW FILTER DIMS (FR-10 / D-4):
+    %%   Users tile         -> users.created_at / spaces.uploaded_at (for activeUsers)
+    %%   Rooms tile         -> spaces.uploaded_at
+    %%   Wishlist tile      -> wishlist.added_at
+    %%   Sales tile         -> wishlist.purchased_at (only status='Purchased')
+    %%
+    %% INVARIANTS (carried from AC-18 / AC-20 / AC-22 / AC-23 / AC-35):
+    %%   + sum(Rooms.statusDistribution)    == totalSpaces
+    %%   + sum(Rooms.styleDistribution)     <= totalSpaces     (NULL style excluded)
+    %%   + sum(Wishlist.statusDistribution) == totalItems      (Active + Purchased)
+    %%   + sum(Wishlist.categoryDistribution) == totalItems
+    %%   + sum(Sales.salesByCategory)       == totalSalesKrw
+    %%   + 0.0 <= Wishlist.conversionRate <= 1.0               (0.0 if totalItems==0)
+    %%   + Sales.totalSalesKrw uses wishlist.price SNAPSHOT, NEVER furniture.price
+    %%
+    %% PRD section 7 cardinalities preserved:
+    %%   User      1 ---  0..*  Space
+    %%   User      1 ---  0..*  Wishlist
+    %%   Wishlist  0..*  ---  1 Furniture
+    %%
+    %% The admin package DOES NOT introduce any new FK, any new table,
+    %% or any new trigger (FR-13). V7 is purely additive on users.

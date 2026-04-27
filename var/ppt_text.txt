@@ -1,0 +1,348 @@
+Times New Roman
+Arial
+Wingdings
+Symbol
+나눔고딕
+＀f＀
+___PPT12
+___PPT10
+!깖쌇
+찳찀ￌ눀늲
+＀찀찀쀀샀
+찀찀눀늲
+팸콟＾
+켝읎튍
+탤뙸꾋
+ㄱ쌜꾆
+켏뢜쐦썎
+딓벆뢧
+걂휓궔
+Rectangle 15
+뵺쐋묢
+렌켬팰퓜
+콞똔쮲
+흷걧죤
+쫜쯰숕
+딭딢퓴
+쳞팰랮
+Rectangle 16
+스터 제목 유형 편집
+Rectangle 17
+스터 문자열 유형 편집 둘째 수준 셋째 수준 넷째 수준 다섯째 수준
+Line 20
+Rectangle 26
+헫럙볟
+둽졿똔
+뭯웎쁦
+돠숄훦뒕멿
+곽뵧볩궷
+륵놔즨
+___PPT9
+0108_14
+Picture 29
+D:\박병섭\기타\학교로고\0108_14.gif
+Picture 30
+걬쮑썎
+뗛뱟텐
+풪퀞뢵훹
+럶뿷햿뿞
+바뿔틕
+왳쇮휀
+헳튉푃호
+팗훡뮬
+왧둁솈
+뗬칫쬼뢛켽
+쨄멛쒺
+뀏뜒좍
+곴왭켳
+봶뵻붝
+걬콕퍯
+륽팤삕
+늄폃롬
+뽵밉쬅
+:샕맣
+괘띞뇙
+묀쀥쭮
+쓩깖튼
+쫼씷쮇
+픓뼟읗
+댚꽑쐫쮴
+뵾쑿랎
+!텻훞
+툅꺈뉘
+윽폗뚃
+빋굚옪
+졍돾휤
+귥갣눏
+헺뽓뮿굠￟셬
+읝쩴뫈릆
+뚓둦씰
+넖갤셝
+엷럫풳
+뫥똫ﾬ
+땛촚븬죂
+꽕팹홃
+핻껜쏙
+ﾒ쳀컚
+뿙먗찃
+쨡쓍첯
+륨흸쳶
+눖윯꾓
+넷둡쮰
+쩳홧퀻
+볪택펯
+쉷랛꿥
+섨틴웄
+뱖헍췎
+뵹퐈컚
+녊푥굪
+찉뗙똙
+기본 디자인
+Rectangle 2
+벅붋랏
+읁땉쨨귲
+윭빒쳕
+횅햛폣
+!뷥쎣
+Rectangle 3
+뭒쑄쨓
+꽱쐼겜
+Rectangle 4
+Rectangle 5
+녧듏을
+쪛톛헠
+믥똙쬎
+죷헶엲_
+뜄뺭닎
+스터 문자열 유형을 편집하려면 누르십시오. 둘째 수준 세째 수준 네째 수준 다섯째 수준
+Rectangle 6
+솘땁엨
+퍒뼨뮸
+횙띪곡
+밫뵅숳
+덟늖뿡
+랒뫛햪
+갮롮끒
+Rectangle 7
+궋홻꽚븮
+옚굡눐
+큶홈긲
+첤쭣쉷
+쬵쌀앭
+앣뷓숇
+뙐탴첄
+깕륻짷
+낝롿괶뺗
+륾뭩뼆
+퐪x늍
+퍌댛땘
+찫픃홖
+Rectangle 33
+Text Box 35
+꺃맥휵
+뽀촕칟
+챐흅몪융
+줪 쐯
+삗믘툉
+퀺듅뭲
+땷멻녔
+응용프로젝트실무 중간발표 ( 제목 : ) 학번 : 이름 : 인하공업전문대학 컴퓨터시스템공학과
+목 차
+1. 프로젝트 개요 2. 프로젝트 목적 3. 프로젝트 특징 4. 개발 내용 4.1 시스템 구성도 4.2 메뉴 구성도 4.3 구성기능(모듈) 4.4 산출물 5. 개발 일정 5.1 계획 대 진도표 6. 시스템 사양 및 구현도구 7. 향후 일정 및 계획 8. 결론 및 고려사항
+1. 프로젝트 개요
+개 요 업무분담 홍길동 : 설계 담당 강감찬 : 코딩 담당
+Text Box 16
+(* 각자 맡은 업무를 상세히 적을것, 1인일 경우는 기술할 필요 없음)
+2. 프로젝트 목적
+본 프로젝트 개발목적
+3. 프로젝트 특징
+본 프로젝트의 특징
+Text Box 4
+(* 참고한 사이트나 프로그램이 있으면 기술)
+4. 개발 내용
+1. 전체 시스템 구성도
+<구성도 그림>
+1. 전체 시스템 구성도 초기화면 구성도
+2. 메뉴 구성도 메뉴 1 메뉴 2
+<메뉴 그림>
+3. 구성 모듈 및 프로세스 모듈 1 모듈 2
+<모듈별 블록도 >
+4. 프로젝트 산출물
+파일/CD
+12월 1주
+Rectangle 8
+프로젝트 문서, 사용자 숙지 기능 설명
+Rectangle 9
+용자 매뉴얼 및 문서자료
+Rectangle 10
+매 뉴 얼 및 작품
+Rectangle 11
+발표 및 보고서
+Rectangle 12
+11월 4주
+Rectangle 13
+최종 발표
+Rectangle 14
+10월 4주
+기술설계를 포함한 중간발표
+중간보고서 최종보고서
+Rectangle 18
+중간보고
+Rectangle 19
+보고서
+Rectangle 20
+10월 2주 (기제출)
+Rectangle 21
+각각의 상세한 기능 설명
+Rectangle 22
+시스템기능분석서
+Rectangle 23
+분 석
+Rectangle 24
+Rectangle 25
+9월말 (기제출)
+프로젝트 제안
+Rectangle 27
+프로젝트 제안서
+Rectangle 28
+제안서
+Rectangle 29
+제출문서
+Rectangle 30
+제출시기
+Rectangle 31
+주요내용
+Rectangle 32
+출물명
+구 분
+Line 34
+Line 35
+Line 36
+Line 37
+Line 38
+Line 39
+Line 40
+Line 41
+Line 42
+Line 43
+Line 44
+Line 45
+Line 46
+Rectangle 47
+Document는 별도 제출함
+Rectangle 57
+최종보고 및 발표회
+Rectangle 58
+5. 개발 일정
+1. 개발 계획 대 진도
+Text Box 82
+(각자 진도를 화살표로 표시할 것, 현재 몇 % 진행되었나?)
+Group 87
+AutoShape 49
+튣췳햜
+쐐펕휍
+퉏썢셩
+AutoShape 50
+홨웝쭰
+ㆍ냺듡
+볭랢졶
+AutoShape 51
+꺦뀡뭙
+룟놢뿎
+읾데듾
+설 계
+AutoShape 52
+묊흑믞
+믟쀜
+햁툎볞
+맰엢럛
+뻷ﾞㆌ붥
+츋멨퐣
+윮닔넬
+Text Box 53
+Text Box 60
+12월
+Text Box 61
+11월4주
+AutoShape 62
+칥츜톜
+쌋꺷쎅
+죺퇬ﾟ
+ㆃ뺝틦
+구 현
+AutoShape 63
+쓪먏똌
+문 서 화
+Line 65
+Line 66
+Line 67
+Line 68
+Text Box 69
+Text Box 70
+제안서제출
+Text Box 71
+시스템 기능명세서 (상세설계)
+Text Box 72
+중간발표
+Line 73
+Line 74
+Line 75
+Line 76
+Line 77
+Line 78
+Text Box 79
+10월 2주
+Text Box 80
+Text Box 84
+깋탤꿱
+먐콑믫
+탱퉡볽
+똃컅쭓
+졠씠럡
+햆늗캯
+(공식진도)
+Text Box 85
+읐캹뤳
+뀼나촿
+겋슙쯉
+(팀별진도)
+Rectangle 86
+6. 시스템 사양 및 구현도구
+1. H/W 시스템 사양(예)
+Rectangle 35
+Rectangle 36
+Rectangle 37
+LG-RW (16배속이상)
+Rectangle 38
+Rectangle 39
+Rectangle 40
+Rectangle 41
+-팬티엄
+800Mhz -256MB, 40GB HDD이상 -LAN CARD (10MB) -사운드카드 -CD-ROM 52배속 -모니터 17인치
+Rectangle 42
+Rectangle 43
+비 고
+Rectangle 44
+수 량
+Rectangle 45
+규 격
+Rectangle 46
+Line 47
+Line 48
+Line 49
+Line 50
+Line 51
+Line 52
+Line 53
+Line 54
+Line 55
+Text Box 57
+(* 각자 적당히 수정할 것)
+2. S/W 시스템 사양(예)
+사용언어
+Rectangle 34
+이미지 편집 툴
+7. 향후일정 및 계획
+1. 현재 구현된 내용 2. 향후 구현할 기능
+8. 결론 및 기타사항
+1. 결론 2. 기타사항

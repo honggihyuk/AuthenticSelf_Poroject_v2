@@ -1,0 +1,329 @@
+%% AuthenticSelf - UC-01-space-analysis: class diagram
+%% Covers both sides of the new AI pipeline:
+%%   - Python FastAPI service under  src/ai/app/**
+%%   - Spring backend package        src/backend/src/main/java/com/authenticself/ai/**
+%%
+%% Source of truth:
+%%   src/ai/app/main.py, schemas.py, errors.py, analyzers/{base,color,dimensions,style}.py
+%%   src/backend/src/main/java/com/authenticself/ai/*.java + dto/*.java
+%%   src/backend/src/main/java/com/authenticself/AuthenticSelfApplication.java  (@EnableScheduling)
+%%   src/backend/src/main/java/com/authenticself/repository/SpaceRepository.java
+
+classDiagram
+    direction LR
+
+    %% ==================================================
+    %% PYTHON SIDE - src/ai/app/**
+    %% ==================================================
+
+    class FastAPIApp {
+      <<FastAPI>>
+      +title = "AuthenticSelf AI - Space Analysis"
+      +version : str
+      +GET  /health                   FR-2 / AC-3
+      +POST /analyze/space            FR-3 / AC-4..AC-10
+      -TODO(task-4) /analyze/style    FR-10 / AC-13 / AC-14
+      -exception_handler RequestValidationError -> INVALID_REQUEST 422
+      -exception_handler AnalyzerError           -> envelope 422
+      -exception_handler Exception               -> INTERNAL_ERROR 500
+    }
+
+    class SpaceAnalyzer {
+      <<Protocol>>
+      +analyze(image_path: Path) SpaceAnalysisResult
+    }
+
+    class SpaceAnalysisResult {
+      <<PydanticModel>>
+      +widthM: float
+      +lengthM: float
+      +heightM: float
+      +mainColor: str (#RRGGBB)
+      +confidence: float [0,1]
+    }
+
+    class ColorExtractor {
+      <<Analyzer / REAL>>
+      -_K = 5
+      -_DOWNSCALE_LONG_EDGE = 256
+      +analyze(image_path) SpaceAnalysisResult
+      %% FR-6 / AC-12 - cv2.imread + cv2.kmeans
+    }
+
+    class DimensionsEstimator {
+      <<Analyzer / Placeholder>>
+      -_FIXED_HEIGHT_M = 2.4
+      +analyze(image_path) SpaceAnalysisResult
+      %% FR-5 - SHA-256 deterministic mapping
+      %% TODO(ml) LayoutNet / YOLO replacement
+    }
+
+    class StyleClassifier {
+      <<Analyzer / Placeholder - UNUSED>>
+      +LABELS = (MODERN, NATURAL, VINTAGE, MINIMAL, SCANDINAVIAN)
+      +analyze(image_path) SpaceAnalysisResult
+      %% FR-10 - exists for Task 4, not registered
+    }
+
+    class AnalyzerBundle {
+      <<Factory>>
+      +dimensions: DimensionsEstimator
+      +color: ColorExtractor
+      +style: StyleClassifier
+    }
+
+    class default_analyzers {
+      <<FastAPI Depends>>
+      +() AnalyzerBundle
+    }
+
+    class SpaceAnalyzeRequest {
+      <<PydanticModel>>
+      +roomId: str  (1-64, ^[A-Za-z0-9_-]+$)
+      +photoUrl: str (^file://.+)
+    }
+
+    class SpaceAnalysisResponse {
+      <<PydanticModel>>
+      +roomId: str
+      +status: "OK"
+      +dimensions: Dimensions
+      +mainColor: str (#RRGGBB)
+      +confidence: float
+      +processingMs: int
+    }
+
+    class Dimensions {
+      <<PydanticModel>>
+      +widthM: float
+      +lengthM: float
+      +heightM: float
+      +areaM2: float
+    }
+
+    class ErrorResponse {
+      <<PydanticModel>>
+      +errorCode: str
+      +message: str
+      +roomId: Optional[str]
+    }
+
+    class AnalyzerError {
+      <<Exception Base>>
+      +code: str = ANALYSIS_FAILED
+      +message: str
+    }
+    class ImageNotFoundError {
+      <<Exception>>
+      +code = IMAGE_NOT_FOUND
+    }
+    class ImageReadError {
+      <<Exception>>
+      +code = IMAGE_READ_FAILED
+    }
+    class AnalysisError {
+      <<Exception>>
+      +code = ANALYSIS_FAILED
+    }
+
+    AnalyzerError <|-- ImageNotFoundError
+    AnalyzerError <|-- ImageReadError
+    AnalyzerError <|-- AnalysisError
+
+    SpaceAnalyzer <|.. ColorExtractor
+    SpaceAnalyzer <|.. DimensionsEstimator
+    SpaceAnalyzer <|.. StyleClassifier
+
+    AnalyzerBundle o-- DimensionsEstimator
+    AnalyzerBundle o-- ColorExtractor
+    AnalyzerBundle o-- StyleClassifier
+    default_analyzers ..> AnalyzerBundle : creates
+
+    FastAPIApp ..> SpaceAnalyzeRequest : validates
+    FastAPIApp ..> SpaceAnalysisResponse : returns
+    FastAPIApp ..> Dimensions : composes
+    FastAPIApp ..> ErrorResponse : returns on error
+    FastAPIApp ..> AnalyzerBundle : Depends(default_analyzers)
+    FastAPIApp ..> AnalyzerError : catches
+    ColorExtractor ..> SpaceAnalysisResult : returns
+    DimensionsEstimator ..> SpaceAnalysisResult : returns
+    StyleClassifier ..> SpaceAnalysisResult : returns
+
+    %% ==================================================
+    %% SPRING SIDE - com.authenticself.ai.**
+    %% ==================================================
+
+    class AIOrchestratorController {
+      <<RestController>>
+      +POST /internal/v1/spaces/{roomId}/analyze   FR-13
+      +analyze(roomId) ResponseEntity~SpaceAnalysisResultDTO~
+    }
+
+    class AIOrchestrator {
+      <<Service>>
+      +analyze(roomId) SpaceAnalysisResultDTO   FR-11 / FR-12 / AC-16..AC-20
+      -formatDimensions(SpaceAnalysisResponse) String
+      -stripZeros(Double) String
+    }
+
+    class SpaceAnalysisClient {
+      <<Client>>
+      -restClient: RestClient (Spring 6 - AC-23)
+      -baseUrl: String
+      +callSpaceAnalysis(roomId: String, photoUrl: String) SpaceAnalysisResponse
+      %% AC-24 - no ResponseEntity, no thread-local (FR-17)
+    }
+
+    class AnalysisPoller {
+      <<Scheduled>>
+      +sweep()   FR-14 / AC-22
+      %% @Scheduled(fixedDelay = app.ai.poller.interval-ms)
+      %% @ConditionalOnProperty(app.ai.poller.enabled, havingValue=true)
+    }
+
+    class AIOrchestratorExceptionAdvice {
+      <<RestControllerAdvice>>
+      +handleAi(AIException) ResponseEntity~ErrorResponse~
+      +handleNotFound(SpaceNotFoundException) ResponseEntity~ErrorResponse~
+      %% FR-15 - Order(HIGHEST_PRECEDENCE) wins over UploadExceptionAdvice
+    }
+
+    class SpaceAnalysisPersistence {
+      <<Service>>
+      +loadForAnalysis(roomId) Snapshot             @Transactional(readOnly, REQUIRES_NEW)
+      +markAnalyzed(roomId, dims, mainColor) void   @Transactional(REQUIRES_NEW)
+      +markFailed(roomId) void                      @Transactional(REQUIRES_NEW)
+      %% FR-12 step 6 - separate bean so AOP proxy opens each tx
+    }
+
+    class Snapshot {
+      <<record>>
+      +status: Space.Status
+      +photoUrl: String
+    }
+
+    class SpaceRepository {
+      <<Repository>>
+      +findById(roomId) Optional~Space~
+      +save(Space) Space
+      +findTop10ByStatusOrderByUploadedAtAsc(Status) List~Space~   FR-14
+    }
+
+    class AIErrorCode {
+      <<enum>>
+      ANALYSIS_IMAGE_NOT_FOUND   (422)
+      ANALYSIS_IMAGE_READ_FAILED (422)
+      ANALYSIS_FAILED            (422)
+      AI_SERVICE_UNAVAILABLE     (502)
+      SPACE_NOT_FOUND            (404)
+      +fromPythonCode(String) AIErrorCode   FR-15
+    }
+
+    class AIException {
+      <<RuntimeException>>
+      +code: AIErrorCode
+      +isTransport() boolean
+    }
+
+    class SpaceNotFoundException {
+      <<RuntimeException>>
+    }
+
+    class SpaceAnalysisRequest {
+      <<DTO / record>>
+      +roomId: String
+      +photoUrl: String
+    }
+
+    class SpringSpaceAnalysisResponse {
+      <<DTO / record>>
+      +roomId: String
+      +status: String
+      +dimensions: Dimensions
+      +mainColor: String
+      +confidence: Double
+      +processingMs: Integer
+    }
+
+    class AiErrorResponse {
+      <<DTO / record>>
+      +errorCode: String
+      +message: String
+      +roomId: String
+    }
+
+    class SpaceAnalysisResultDTO {
+      <<DTO / record>>
+      +roomId: String
+      +status: String
+      +dimensions: String  (WxLxHm)
+      +mainColor: String
+      +processingMs: Integer
+      +skipped: Boolean
+      +reason: String
+      +ofAnalyzed(...) SpaceAnalysisResultDTO
+      +ofSkipped(...)  SpaceAnalysisResultDTO
+    }
+
+    class Space {
+      <<Entity>>
+      +roomId: String
+      +status: Status
+      +photoUrl: String
+      +dimensions: String
+      +mainColor: String
+      +style: String
+      +analysisDate: LocalDateTime
+    }
+
+    AIOrchestratorController --> AIOrchestrator
+    AIOrchestrator --> SpaceAnalysisPersistence
+    AIOrchestrator --> SpaceAnalysisClient
+    AIOrchestrator ..> SpaceAnalysisResultDTO : returns
+    AIOrchestrator ..> AIException : throws
+    AnalysisPoller --> SpaceRepository
+    AnalysisPoller --> AIOrchestrator
+    SpaceAnalysisPersistence --> SpaceRepository
+    SpaceAnalysisPersistence ..> Snapshot : returns
+    SpaceAnalysisPersistence ..> SpaceNotFoundException : throws
+    SpaceRepository --> Space : manages
+    SpaceAnalysisClient ..> SpaceAnalysisRequest : sends
+    SpaceAnalysisClient ..> SpringSpaceAnalysisResponse : receives
+    SpaceAnalysisClient ..> AiErrorResponse : parses on error
+    SpaceAnalysisClient ..> AIException : throws
+    SpaceAnalysisClient ..> AIErrorCode : uses
+    AIException --> AIErrorCode
+    AIOrchestratorExceptionAdvice ..> AIException : handles
+    AIOrchestratorExceptionAdvice ..> SpaceNotFoundException : handles
+
+    %% Cross-process wire
+    SpaceAnalysisClient ..> FastAPIApp : HTTP POST /analyze/space
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% Python classes
+%%   FastAPIApp ................ FR-1 / FR-2 / FR-3 / FR-7 / FR-8 / FR-10 / AC-3 / AC-10 / AC-13 / AC-14
+%%   SpaceAnalyzer (Protocol) .. FR-4 / AC-11
+%%   SpaceAnalysisResult ....... FR-4
+%%   ColorExtractor ............ FR-6 / AC-12
+%%   DimensionsEstimator ....... FR-5 / AC-11
+%%   StyleClassifier ........... FR-5 / FR-10 / AC-11 (placeholder, unused)
+%%   AnalyzerBundle/default_analyzers . FR-4 (DI surface)
+%%   SpaceAnalyzeRequest ....... FR-3 / AC-8
+%%   SpaceAnalysisResponse ..... FR-3 / AC-4
+%%   Dimensions ................ FR-3
+%%   ErrorResponse ............. FR-7
+%%   AnalyzerError hierarchy ... FR-7
+%%
+%% Spring classes
+%%   AIOrchestratorController .. FR-13 / AC-16..AC-20
+%%   AIOrchestrator ............ FR-11 / FR-12 / FR-17 / AC-16..AC-20 / AC-24
+%%   SpaceAnalysisClient ....... FR-11 / FR-15 / FR-17 / AC-23 / AC-24
+%%   AnalysisPoller ............ FR-14 / AC-22
+%%   AIOrchestratorExceptionAdvice . FR-15
+%%   SpaceAnalysisPersistence .. FR-12 step 6
+%%   AIErrorCode ............... FR-15
+%%   AIException / SpaceNotFoundException . FR-11 / FR-15 / AC-20
+%%   DTOs (Request / Response / AiError / ResultDTO) .. FR-3 / FR-7 / FR-13
+%%   SpaceRepository.findTop10... . FR-14

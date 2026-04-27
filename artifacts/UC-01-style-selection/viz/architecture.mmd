@@ -1,0 +1,277 @@
+%% AuthenticSelf - UC-01-style-selection: system architecture (PRD section 9)
+%% UPDATED from artifacts/UC-01-space-analysis/viz/architecture.mmd
+%%
+%% Changes landed in THIS task (Task 4):
+%%   Client Layer:
+%%     - AnalyzingScreen NOW ACTIVE (green) - full exponential-backoff polling (FR-19).
+%%     - StyleSelectionScreen NEW ACTIVE (green) - six options + AI badge (FR-18).
+%%     - new module src/mobile/src/types/style.ts (shared enum + labels, FR-20).
+%%     - new module src/mobile/src/api/pollSchedule.ts (FR-19 schedule).
+%%     - RecommendationScreen still pending (Task 5).
+%%   Backend:
+%%     - NEW public SpaceController (CORS-enabled, OpenAPI-visible):
+%%         GET /api/v1/spaces/{roomId}                   (polling endpoint, FR-14)
+%%         PUT /api/v1/spaces/{roomId}/preferred-style   (FR-14)
+%%     - SpaceExceptionAdvice / SpaceErrorCode / SpaceException (space package).
+%%     - NEW com.authenticself.ai.StyleAnalysisClient (sibling of SpaceAnalysisClient).
+%%     - NEW AiExecutorConfig (aiExecutor ThreadPoolTaskExecutor bean, FR-11).
+%%     - NEW StyleConfidenceCache (in-memory, TTL 15m, FR-14).
+%%     - AIOrchestrator UPDATED: parallel fan-out via CompletableFuture.allOf (FR-11 / FR-12).
+%%     - SpaceAnalysisPersistence UPDATED: markAnalyzed now takes nullable style,
+%%         added loadForRead + setPreferredStyle (FR-14).
+%%     - NEW Style + PreferredStyle enums in com.authenticself.space.
+%%     - NEW DTOs SpaceResponse, SetPreferredStyleRequest, StyleAnalysisRequest/Response.
+%%     - NEW V3 migration `V3__add_preferred_style.sql` (FR-9 / AC-9).
+%%   AI Service Layer:
+%%     - 공간 분석 서버 (Python FastAPI :8001) stays ACTIVE.
+%%     - "스타일 & 추천 서버" partial: style analysis NOW ACTIVE
+%%         (new router app/routes/style.py, StyleClassifier wired in via Depends).
+%%         Recommendation sub-role still PENDING (Task 5).
+%%   Data Layer:
+%%     - `spaces` schema gains preferred_style VARCHAR(32) NULL.
+%%     - flyway_schema_history gains V3 row.
+%%
+%% Source of truth:
+%%   src/ai/app/** (main.py / routes/style.py / analyzers/__init__.py / analyzers/style.py / schemas.py)
+%%   src/backend/src/main/java/com/authenticself/ai/** (AIOrchestrator, StyleAnalysisClient, AiExecutorConfig, StyleConfidenceCache, SpaceAnalysisPersistence, ...)
+%%   src/backend/src/main/java/com/authenticself/space/** (SpaceController, Style, PreferredStyle, SpaceException, ...)
+%%   src/backend/src/main/java/com/authenticself/controller/dto/{SpaceResponse,SetPreferredStyleRequest}.java
+%%   src/backend/src/main/java/com/authenticself/domain/Space.java
+%%   src/backend/src/main/resources/db/migration/V3__add_preferred_style.sql
+%%   src/mobile/src/screens/{AnalyzingScreen,StyleSelectionScreen}.tsx
+%%   src/mobile/src/api/pollSchedule.ts
+%%   src/mobile/src/types/style.ts
+
+flowchart LR
+
+    %% =========================================================
+    %% Client Layer - AnalyzingScreen + StyleSelectionScreen ACTIVE
+    %% =========================================================
+    subgraph Client["Client Layer"]
+        direction TB
+        RN_Home["HomeScreen (RN)<br/>Task 2 - active"]:::active
+        RN_Upload["UploadScreen (RN)<br/>POST /api/v1/spaces/photo<br/>Task 2 - active"]:::active
+        RN_Analyzing["AnalyzingScreen (RN)<br/>GET /api/v1/spaces/{roomId}<br/>exp backoff 1..10s, 60s budget<br/>Task 4 FR-19 - NOW ACTIVE"]:::active4
+        RN_Style["StyleSelectionScreen (RN)<br/>6 options, AI-detected badge<br/>PUT /preferred-style<br/>Task 4 FR-18 - NEW ACTIVE"]:::active4
+        RN_Rec["RecommendationScreen<br/>(UC-01-recommendation Task 5)"]:::pending
+        RN_Api["api/client.ts<br/>+ getSpace / setPreferredStyle<br/>Task 4 FR-21"]:::active4
+        RN_Types["types/style.ts<br/>Style | PreferredStyle + labels<br/>Task 4 FR-20 / AC-27"]:::active4
+        RN_Poll["api/pollSchedule.ts<br/>delayForAttempt(n) capped 10s<br/>Task 4 FR-19"]:::active4
+        FE_Admin["Admin Dashboard<br/>(UC-03)"]:::pending
+        FE_Unity["Unity AR Placement<br/>(AR-furniture-placement)"]:::pending
+    end
+
+    %% =========================================================
+    %% Backend Layer - Task 2 / 3 + Task 4 additions
+    %% =========================================================
+    subgraph Backend["Backend Layer"]
+        direction TB
+        App["AuthenticSelfApplication<br/>@SpringBootApplication + @EnableScheduling"]:::active
+        FW["Flyway migrator<br/>V1 + V2 + V3 (Task 4 FR-9)"]:::active4
+        HB["Hibernate (ddl-auto=validate)"]:::active
+        APIGW["API Gateway / Dispatcher<br/>Spring MVC"]:::active
+
+        %% ---- Task 2 photo-upload slice (unchanged) ----
+        CTRL_PHOTO["PhotoUploadController<br/>POST /api/v1/spaces/photo<br/>Task 2"]:::active
+        ADV_UP["UploadExceptionAdvice<br/>Task 2"]:::active
+        SVC_PHOTO["PhotoUploadService<br/>Task 2"]:::active
+        STORE_IF["ObjectStorageService (iface)<br/>Task 2"]:::active
+        STORE_IMPL["LocalFileSystemObjectStorageService<br/>Task 2"]:::active
+
+        REPO_S["SpaceRepository<br/>Task 2 + Task 3 derived query"]:::active
+        REPO_U["UserRepository<br/>Task 2"]:::active
+
+        %% ---- Task 3 AI orchestrator (INTERNAL) ----
+        subgraph AIpkg["com.authenticself.ai.*  (Task 3 + Task 4)"]
+            direction TB
+            CTRL_AI["AIOrchestratorController<br/>POST /internal/v1/spaces/{roomId}/analyze<br/>INTERNAL (no CORS)<br/>Task 3 FR-13"]:::active
+            ADV_AI["AIOrchestratorExceptionAdvice<br/>Task 3"]:::active
+            ORCH["AIOrchestrator<br/>@Service<br/>Task 4 UPDATED: parallel fan-out<br/>CompletableFuture.allOf + partial-success matrix<br/>FR-11 / FR-12 / FR-17"]:::active4
+            CLIENT_SP["SpaceAnalysisClient<br/>Task 3"]:::active
+            CLIENT_ST["StyleAnalysisClient<br/>RestClient, same timeouts<br/>Task 4 FR-8 / AC-11 - NEW"]:::active4
+            EXEC["aiExecutor<br/>ThreadPoolTaskExecutor<br/>core=2 / max=8 / queue=64<br/>prefix ai-orchestrator-<br/>Task 4 FR-11 - NEW"]:::active4
+            CACHE["StyleConfidenceCache<br/>ConcurrentHashMap + 15m TTL<br/>Task 4 FR-14 - NEW"]:::active4
+            PERS["SpaceAnalysisPersistence<br/>Task 3 + Task 4 adds<br/>loadForRead + setPreferredStyle +<br/>markAnalyzed(...,style)"]:::active4
+            POLLER["AnalysisPoller<br/>@Scheduled fixedDelay=15s<br/>Task 3"]:::active
+            DTOS_AI["dto/*<br/>+ StyleAnalysisRequest<br/>+ StyleAnalysisResponse<br/>(Task 4 NEW)"]:::active4
+            ERRS["AIErrorCode / AIException /<br/>SpaceNotFoundException"]:::active
+            INT(["internal<br/>/internal/v1/*"]):::internalTag
+        end
+
+        %% ---- Task 4 public space package ----
+        subgraph SpPkg["com.authenticself.space.*  (NEW Task 4)"]
+            direction TB
+            CTRL_SP["SpaceController<br/>@CrossOrigin - PUBLIC<br/>GET /api/v1/spaces/{roomId}<br/>PUT /api/v1/spaces/{roomId}/preferred-style<br/>Task 4 FR-14 / FR-15"]:::active4
+            ADV_SP["SpaceExceptionAdvice<br/>@Order(HIGHEST_PRECEDENCE)<br/>basePackages=com.authenticself.space<br/>Task 4"]:::active4
+            ERR_SP["SpaceErrorCode / SpaceException<br/>INVALID_PREFERRED_STYLE 400<br/>ANALYSIS_NOT_READY 409<br/>SPACE_ACCESS_DENIED 403<br/>SPACE_NOT_FOUND 404<br/>MISSING_USER_HEADER 400<br/>Task 4"]:::active4
+            ENUMS["Style {MODERN,SIMPLE,CLASSIC,<br/>SCANDINAVIAN,INDUSTRIAL}<br/>PreferredStyle = Style + CURRENT<br/>Task 4 FR-8 / AC-10"]:::active4
+            DTOS_SP["dto/*<br/>SpaceResponse<br/>SetPreferredStyleRequest<br/>ErrorResponse (shared)<br/>Task 4"]:::active4
+            PUB(["public<br/>/api/v1/*"]):::publicTag
+        end
+
+        CTRL_WL["Wishlist API<br/>(UC-02)"]:::pending
+        CTRL_ADMIN["Admin API<br/>(UC-03)"]:::pending
+    end
+
+    %% =========================================================
+    %% Data Layer - V3 migration
+    %% =========================================================
+    subgraph Data["Data Layer (V1 + V2 + V3)"]
+        direction TB
+        MY[("MySQL 8<br/>schema=authenticself")]:::active
+        T_U[("users")]:::active
+        T_S[("spaces<br/>V3 adds preferred_style VARCHAR(32) NULL<br/>Task 4 writes style + preferred_style")]:::active4
+        T_F[("furniture")]:::active
+        T_W[("wishlist")]:::active
+        HIST[("flyway_schema_history<br/>+V3 row")]:::active4
+        OBJ["Object Storage<br/>Local FS ./var/object-storage"]:::active
+    end
+
+    %% =========================================================
+    %% AI Service Layer - space ACTIVE, style NOW ACTIVE, rec PENDING
+    %% =========================================================
+    subgraph AI["AI Service Layer"]
+        direction TB
+        subgraph ONE_FASTAPI["single FastAPI process :8001  src/ai/app/**"]
+            direction TB
+            PY_APP["app/main.py<br/>GET /health<br/>POST /analyze/space<br/>include_router(style_router)<br/>Task 3 + Task 4 FR-1 / AC-1"]:::active4
+
+            subgraph SpaceSVC["공간 분석 서버  (Task 3 - ACTIVE)"]
+                PY_SPACE_ANALYZERS["analyzers/color.py (REAL cv2 kmeans)<br/>analyzers/dimensions.py (placeholder)"]:::active
+            end
+
+            subgraph StyleSVC["스타일 & 추천 서버 - 스타일  (Task 4 NOW ACTIVE)"]
+                PY_STYLE_ROUTE["routes/style.py<br/>async analyze_style + to_thread<br/>FR-1 / FR-6 / FR-7 / AC-6"]:::active4
+                PY_STYLE_ANALYZER["analyzers/style.py<br/>StyleClassifier<br/>sha256 -> argmax (placeholder)<br/>FR-3 / FR-4 / AC-8"]:::active4
+                PY_SCHEMAS["schemas.py<br/>+ StyleAnalyzeRequest<br/>+ StyleAnalysisResponse<br/>+ StyleLabel (5 values, no CURRENT)<br/>FR-2 / AC-2 / AC-4"]:::active4
+            end
+
+            PY_DEPS["runtime deps unchanged:<br/>fastapi / uvicorn / pydantic / numpy<br/>opencv-python-headless / pillow<br/>NO ultralytics / torch / keras (AC-7)"]:::active
+        end
+        REC_SVC["스타일 & 추천 서버 - 추천 엔진<br/>(UC-01-recommendation Task 5)"]:::pending
+    end
+
+    %% --- Active wiring (Task 2) ---
+    RN_Home --> RN_Upload
+    RN_Upload --> RN_Api
+    RN_Upload --> RN_Analyzing
+    RN_Analyzing --> RN_Api
+    RN_Analyzing --> RN_Poll
+    RN_Analyzing --> RN_Style
+    RN_Style --> RN_Api
+    RN_Style --> RN_Types
+    RN_Style -.replace.-> RN_Rec
+    RN_Api -->|POST /api/v1/spaces/photo<br/>X-User-Id| APIGW
+    RN_Api -->|GET /api/v1/spaces/{roomId}<br/>PUT /api/v1/spaces/{roomId}/preferred-style<br/>X-User-Id| APIGW
+
+    APIGW --> CTRL_PHOTO
+    CTRL_PHOTO --> SVC_PHOTO
+    CTRL_PHOTO --> ADV_UP
+    SVC_PHOTO --> STORE_IF
+    STORE_IF -.implements.-> STORE_IMPL
+    SVC_PHOTO --> REPO_S
+    SVC_PHOTO --> REPO_U
+    STORE_IMPL --> OBJ
+
+    App --> FW
+    App --> HB
+    FW -->|V1 + V2 + V3| MY
+    FW -->|writes| HIST
+    MY --- T_U
+    MY --- T_S
+    MY --- T_F
+    MY --- T_W
+    MY --- HIST
+    REPO_S --> MY
+    REPO_U --> MY
+
+    %% --- Task 3 AI internal wiring ---
+    APIGW ==>|internal only| CTRL_AI
+    INT -.-> CTRL_AI
+    CTRL_AI --> ORCH
+    CTRL_AI --> ADV_AI
+    ORCH --> PERS
+    ORCH --> CLIENT_SP
+    ORCH --> CLIENT_ST
+    ORCH --> EXEC
+    ORCH --> CACHE
+    PERS --> REPO_S
+    POLLER --> REPO_S
+    POLLER --> ORCH
+    ORCH ..> DTOS_AI
+    CLIENT_SP ..> DTOS_AI
+    CLIENT_ST ..> DTOS_AI
+    CLIENT_SP ..> ERRS
+    CLIENT_ST ..> ERRS
+    ADV_AI ..> ERRS
+
+    %% --- Task 4 public space wiring ---
+    APIGW ==>|public CORS| CTRL_SP
+    PUB -.-> CTRL_SP
+    CTRL_SP --> PERS
+    CTRL_SP --> CACHE
+    CTRL_SP --> ADV_SP
+    CTRL_SP ..> DTOS_SP
+    CTRL_SP ..> ENUMS
+    ADV_SP ..> ERR_SP
+
+    %% --- Cross-process wires to Python ---
+    CLIENT_SP ==>|POST /analyze/space<br/>{roomId, photoUrl}| PY_APP
+    CLIENT_ST ==>|POST /analyze/style<br/>{roomId, photoUrl}<br/>Task 4 FR-1| PY_APP
+    PY_APP --> PY_SPACE_ANALYZERS
+    PY_APP --> PY_STYLE_ROUTE
+    PY_STYLE_ROUTE --> PY_STYLE_ANALYZER
+    PY_APP --> PY_SCHEMAS
+
+    %% --- Pending wiring (future tasks) ---
+    FE_Admin -.-> APIGW
+    FE_Unity -.-> APIGW
+    APIGW -.-> CTRL_WL
+    APIGW -.-> CTRL_ADMIN
+    ORCH -.Task 5 reads style + preferred_style.-> REC_SVC
+    REC_SVC -.reads dimensions + main_color + style + preferred_style.-> MY
+
+    classDef active      fill:#d4edda,stroke:#28a745,color:#155724,stroke-width:2px;
+    classDef active4     fill:#cfe2ff,stroke:#0d6efd,color:#052c65,stroke-width:2px;
+    classDef scaffold    fill:#fff3cd,stroke:#d39e00,color:#856404,stroke-width:2px;
+    classDef pending     fill:#f1f1f1,stroke:#999,color:#777,stroke-dasharray:4 3;
+    classDef internalTag fill:#f5e0ff,stroke:#7a3ec5,color:#3d1b64,stroke-width:1px;
+    classDef publicTag   fill:#ffe0f0,stroke:#c53e89,color:#63194a,stroke-width:1px;
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% GREEN (active) - preserved from Task 2 / 3:
+%%   Task 2 upload slice, Task 3 internal AI orchestration + poller,
+%%   Python /analyze/space + analyzers (color real, dimensions placeholder).
+%%
+%% BLUE (active4) - delivered by Task 4 (UC-01-style-selection):
+%%   RN AnalyzingScreen polling ....... FR-19 / AC-31..AC-33
+%%   RN StyleSelectionScreen .......... FR-18 / AC-28..AC-30
+%%   RN types/style.ts (shared enum) .. FR-20 / AC-27
+%%   RN api/pollSchedule.ts ........... FR-19
+%%   RN api/client.ts getSpace / PUT .. FR-21
+%%   Python POST /analyze/style ....... FR-1 / FR-2 / FR-6 / FR-7 / AC-1..AC-6
+%%   Python StyleClassifier (active) .. FR-3 / FR-4 / AC-8
+%%   Python StyleLabel literal ........ FR-2 / AC-4
+%%   Spring StyleAnalysisClient ....... FR-8 / AC-11
+%%   Spring AiExecutorConfig .......... FR-11
+%%   Spring StyleConfidenceCache ...... FR-14 (transient)
+%%   Spring AIOrchestrator parallel ... FR-11 / FR-12 / FR-17 / AC-12..AC-17
+%%   Spring SpaceController (public) .. FR-14 / FR-15 / AC-19..AC-26
+%%   Spring SpaceExceptionAdvice ...... FR-14
+%%   Spring SpaceErrorCode/Exception .. FR-14 / AC-20 / AC-21 / AC-24 / AC-25
+%%   Spring Style + PreferredStyle .... FR-8 / AC-10 / AC-26
+%%   Spring SpaceResponse DTO ......... FR-14 / AC-19
+%%   Spring SetPreferredStyleRequest .. FR-14 / AC-22 / AC-24
+%%   Spring Space.preferredStyle field  FR-10 / AC-18
+%%   application.yml app.ai.style.* ... FR-16 / AC-34
+%%   V3 Flyway migration .............. FR-9 / AC-9
+%%
+%% PURPLE / PINK (route tags):
+%%   INTERNAL /internal/v1/* stays CORS-free (NFR).
+%%   PUBLIC  /api/v1/*  @CrossOrigin origins="*" on SpaceController.
+%%
+%% GREY (pending) - future tasks:
+%%   Recommendation engine ............ Task 5 (UC-01-recommendation)
+%%   Wishlist / Admin / Unity AR ...... Task 6 / 7 / 8

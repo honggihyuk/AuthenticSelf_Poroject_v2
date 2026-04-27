@@ -1,0 +1,208 @@
+%% AuthenticSelf - UC-01-space-analysis: updated system architecture (PRD section 9)
+%% Baseline: artifacts/UC-01-photo-upload/viz/architecture.mmd (Task 2)
+%%
+%% Updates landed in THIS task (Task 3):
+%%   - Client Layer: unchanged; AnalyzingScreen still a scaffold (Task 4 will wire it).
+%%   - Backend: NEW com.authenticself.ai.* package ACTIVE (green):
+%%         AIOrchestrator, SpaceAnalysisClient, AIOrchestratorController,
+%%         AIOrchestratorExceptionAdvice, AnalysisPoller,
+%%         SpaceAnalysisPersistence, AIErrorCode, AIException,
+%%         dto/{SpaceAnalysisRequest, SpaceAnalysisResponse, AiErrorResponse,
+%%              SpaceAnalysisResultDTO}.
+%%         AuthenticSelfApplication now @EnableScheduling for the poller.
+%%         SpaceRepository gains findTop10ByStatusOrderByUploadedAtAsc(PENDING_ANALYSIS).
+%%   - AI Service Layer:
+%%         공간 분석 서버 (Python FastAPI :8001) ACTIVE (green) -
+%%             src/ai/app/** with OpenCV + Pillow + numpy, no ultralytics / mediapipe / torch.
+%%         스타일 & 추천 서버 STILL PENDING (grey) - Task 4 and Task 5 deliver those.
+%%   - Data Layer: unchanged - no schema change this task (AC-26).
+%%
+%% Source of truth:
+%%   src/ai/app/**
+%%   src/backend/src/main/java/com/authenticself/ai/**
+%%   src/backend/src/main/java/com/authenticself/AuthenticSelfApplication.java
+%%   src/backend/src/main/java/com/authenticself/repository/SpaceRepository.java
+%%   src/backend/src/main/resources/application.yml (app.ai.* - FR-16 / AC-21)
+
+flowchart LR
+
+    %% =========================================================
+    %% Client Layer - mostly unchanged from Task 2
+    %% =========================================================
+    subgraph Client["Client Layer"]
+        direction TB
+        RN_Home["HomeScreen (RN)<br/>Task 2 - active"]:::active
+        RN_Upload["UploadScreen (RN)<br/>POST /api/v1/spaces/photo<br/>Task 2 - active"]:::active
+        RN_Analyzing["AnalyzingScreen (stub)<br/>Task 2 scaffold - real polling in Task 4"]:::scaffold
+        RN_Api["api/client.ts + errorMessages.ts<br/>Task 2 - active"]:::active
+        FE_Admin["Admin Dashboard<br/>(UC-03)"]:::pending
+        FE_Unity["Unity AR Placement<br/>(AR-furniture-placement)"]:::pending
+    end
+
+    %% =========================================================
+    %% Backend Layer - Task 2 slice + NEW ai.* package (Task 3)
+    %% =========================================================
+    subgraph Backend["Backend Layer - Task 2 + Task 3 AI orchestrator"]
+        direction TB
+        App["AuthenticSelfApplication<br/>@SpringBootApplication + @EnableScheduling<br/>Task 3 adds @EnableScheduling"]:::active
+        FW["Flyway migrator<br/>V1 + V2 (no V3 - AC-26)"]:::active
+        HB["Hibernate (ddl-auto=validate)"]:::active
+
+        APIGW["API Gateway / Dispatcher<br/>Spring MVC"]:::active
+
+        %% ---- Task 2 photo-upload slice ----
+        CTRL_PHOTO["PhotoUploadController<br/>POST /api/v1/spaces/photo<br/>Task 2"]:::active
+        ADV_UP["UploadExceptionAdvice<br/>Task 2"]:::active
+        SVC_PHOTO["PhotoUploadService<br/>Task 2"]:::active
+        STORE_IF["ObjectStorageService (iface)<br/>Task 2"]:::active
+        STORE_IMPL["LocalFileSystemObjectStorageService<br/>Task 2"]:::active
+
+        REPO_S["SpaceRepository<br/>+ findTop10ByStatusOrderByUploadedAtAsc()<br/>Task 3 adds derived query<br/>FR-14"]:::active
+        REPO_U["UserRepository<br/>Task 2"]:::active
+
+        %% ---- Task 3 AI orchestrator package (ACTIVE) ----
+        subgraph AIpkg["com.authenticself.ai.*  NEW in Task 3 (ACTIVE)"]
+            direction TB
+            CTRL_AI["AIOrchestratorController<br/>POST /internal/v1/spaces/{roomId}/analyze<br/>internal-only (not CORS, not public OpenAPI)<br/>FR-13 / AC-16..AC-20"]:::active
+            ADV_AI["AIOrchestratorExceptionAdvice<br/>@RestControllerAdvice<br/>Order: HIGHEST_PRECEDENCE<br/>FR-15"]:::active
+            ORCH["AIOrchestrator<br/>@Service<br/>FR-11 / FR-12 / FR-17"]:::active
+            CLIENT["SpaceAnalysisClient<br/>Spring 6 RestClient (AC-23)<br/>(String,String) -&gt; DTO (AC-24)<br/>FR-11 / FR-15"]:::active
+            PERS["SpaceAnalysisPersistence<br/>@Transactional(REQUIRES_NEW)<br/>FR-12 step 6"]:::active
+            POLLER["AnalysisPoller<br/>@Scheduled(fixedDelay=15s)<br/>@ConditionalOnProperty(app.ai.poller.enabled)<br/>FR-14 / AC-22"]:::active
+            DTOS["dto/*<br/>SpaceAnalysisRequest<br/>SpaceAnalysisResponse<br/>AiErrorResponse<br/>SpaceAnalysisResultDTO"]:::active
+            ERRS["AIErrorCode (enum)<br/>AIException / SpaceNotFoundException<br/>FR-15"]:::active
+            INT(["internal<br/>/internal/v1/*"]):::internalTag
+        end
+
+        %% ---- still pending ----
+        CTRL_USER["UserService / Auth<br/>(future)"]:::pending
+        CTRL_WL["Wishlist API<br/>(UC-02)"]:::pending
+        CTRL_ADMIN["Admin API<br/>(UC-03)"]:::pending
+    end
+
+    %% =========================================================
+    %% Data Layer - unchanged (no V3 migration - AC-26)
+    %% =========================================================
+    subgraph Data["Data Layer - unchanged (no V3 this task)"]
+        direction TB
+        MY[("MySQL 8<br/>schema=authenticself")]:::active
+        T_U[("users")]:::active
+        T_S[("spaces<br/>V1+V2 delta<br/>Task 3 writes dimensions / main_color / analysis_date / status")]:::active
+        T_F[("furniture")]:::active
+        T_W[("wishlist")]:::active
+        HIST[("flyway_schema_history")]:::active
+        OBJ["Object Storage<br/>Local FS ./var/object-storage<br/>Task 2"]:::active
+    end
+
+    %% =========================================================
+    %% AI Service Layer - space analysis ACTIVE, style/recommend pending
+    %% =========================================================
+    subgraph AI["AI Service Layer - space ACTIVE, style/recommend PENDING"]
+        direction TB
+        subgraph SPACE_SVC["공간 분석 서버  (Python FastAPI :8001)  ACTIVE - Task 3"]
+            direction TB
+            PY_APP["src/ai/app/main.py<br/>FastAPI app<br/>GET /health   (FR-2 / AC-3)<br/>POST /analyze/space  (FR-3)"]:::active
+            PY_ANALYZERS["analyzers/*<br/>ColorExtractor (REAL - cv2 kmeans)<br/>DimensionsEstimator (placeholder / SHA-256)<br/>StyleClassifier (placeholder - UNUSED in Task 3)"]:::active
+            PY_DEPS["runtime deps:<br/>fastapi / uvicorn / pydantic / numpy<br/>opencv-python-headless / pillow<br/>NO ultralytics / mediapipe / torch (AC-2)"]:::active
+            PY_NOTE["TODO(task-4) /analyze/style<br/>NOT registered (AC-13 / AC-14)"]:::scaffold
+        end
+        SR["스타일 & 추천 서버 - 스타일 인식<br/>(UC-01-style-selection, Task 4)<br/>will add POST /analyze/style + StyleAnalysisClient"]:::pending
+        RE["스타일 & 추천 서버 - 추천 엔진<br/>(UC-01-recommendation, Task 5)"]:::pending
+    end
+
+    %% --- Active wiring (Task 2 carried forward) ---
+    RN_Home --> RN_Upload
+    RN_Upload --> RN_Api
+    RN_Upload --> RN_Analyzing
+    RN_Api -->|POST /api/v1/spaces/photo<br/>X-User-Id| APIGW
+    APIGW --> CTRL_PHOTO
+    CTRL_PHOTO --> SVC_PHOTO
+    CTRL_PHOTO --> ADV_UP
+    SVC_PHOTO --> STORE_IF
+    STORE_IF -.implements.-> STORE_IMPL
+    SVC_PHOTO --> REPO_S
+    SVC_PHOTO --> REPO_U
+    STORE_IMPL --> OBJ
+    App --> FW
+    App --> HB
+    FW -->|V1 + V2| MY
+    FW -->|writes| HIST
+    MY --- T_U
+    MY --- T_S
+    MY --- T_F
+    MY --- T_W
+    MY --- HIST
+    REPO_S --> MY
+    REPO_U --> MY
+
+    %% --- Active wiring (Task 3 - NEW) ---
+    APIGW ==>|internal only| CTRL_AI
+    INT -.-> CTRL_AI
+    CTRL_AI --> ORCH
+    CTRL_AI --> ADV_AI
+    ORCH --> PERS
+    ORCH --> CLIENT
+    PERS --> REPO_S
+    POLLER --> REPO_S
+    POLLER --> ORCH
+    ORCH ..> DTOS
+    CLIENT ..> DTOS
+    CLIENT ..> ERRS
+    ADV_AI ..> ERRS
+    App --> POLLER
+    CLIENT ==>|POST /analyze/space<br/>JSON {roomId, photoUrl}| PY_APP
+    PY_APP --> PY_ANALYZERS
+    PY_APP --> PY_DEPS
+    PY_APP -.-> PY_NOTE
+
+    %% --- Pending wiring (future tasks, dashed) ---
+    FE_Admin -.-> APIGW
+    FE_Unity -.-> APIGW
+    APIGW -.-> CTRL_USER
+    APIGW -.-> CTRL_WL
+    APIGW -.-> CTRL_ADMIN
+    ORCH -.Task 4 fan-out.-> SR
+    SR -.writes style.-> MY
+    SR -.-> RE
+    RE -.reads dimensions + main_color + style.-> MY
+
+    classDef active     fill:#d4edda,stroke:#28a745,color:#155724,stroke-width:2px;
+    classDef scaffold   fill:#fff3cd,stroke:#d39e00,color:#856404,stroke-width:2px;
+    classDef pending    fill:#f1f1f1,stroke:#999,color:#777,stroke-dasharray:4 3;
+    classDef internalTag fill:#f5e0ff,stroke:#7a3ec5,color:#3d1b64,stroke-width:1px;
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% GREEN (active) - delivered / updated by Task 3 (UC-01-space-analysis):
+%%   Backend com.authenticself.ai.*  :
+%%     AIOrchestrator ................ FR-11, FR-12, FR-17, AC-16..AC-20, AC-24
+%%     SpaceAnalysisClient ........... FR-11, FR-15, AC-23, AC-24
+%%     AIOrchestratorController ...... FR-13 (internal POST /internal/v1/spaces/{roomId}/analyze)
+%%     AIOrchestratorExceptionAdvice . FR-15
+%%     AnalysisPoller ................ FR-14, AC-22 (@ConditionalOnProperty)
+%%     SpaceAnalysisPersistence ...... FR-12 step 6 (@Transactional(REQUIRES_NEW) via proxy)
+%%     AIErrorCode / AIException ..... FR-15
+%%     dto/* (4 records) ............. FR-3, FR-7, FR-13
+%%     AuthenticSelfApplication ...... @EnableScheduling (FR-14)
+%%     SpaceRepository derived query . FR-14
+%%     application.yml app.ai.* keys . FR-16 / AC-21
+%%   AI Service Layer 공간 분석 서버 (Python FastAPI) :
+%%     FastAPI app + /health + /analyze/space . FR-1..FR-3, AC-3, AC-4, AC-25
+%%     analyzers: Color (REAL), Dimensions/Style (placeholders) . FR-4..FR-6, AC-11, AC-12
+%%     async def + asyncio.to_thread ........... FR-8, AC-10
+%%     pyproject.toml / requirements.txt deps .. FR-1, AC-2
+%%     AI_PHOTO_ROOT allow-list ................ NFR security, AC-9
+%%     TODO(task-4) /analyze/style NOT wired ... FR-10, AC-13, AC-14
+%%
+%% YELLOW (scaffold) - carried over, finished later:
+%%   AnalyzingScreen ................ full polling in Task 4 / 5
+%%   Python TODO(task-4) note ....... Task 4 turns it into a real router
+%%
+%% PURPLE (internal tag) - /internal/v1/* not CORS, not public OpenAPI:
+%%   FR-13 / NFR - production ingress must block.
+%%
+%% GREY (pending) - future tasks:
+%%   Style analysis server + StyleAnalysisClient ...... Task 4 (UC-01-style-selection)
+%%   Recommendation engine ............................ Task 5 (UC-01-recommendation)
+%%   Wishlist / Admin / Unity AR ...................... Task 6 / 7 / 8

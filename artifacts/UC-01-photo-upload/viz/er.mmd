@@ -1,0 +1,85 @@
+%% AuthenticSelf - UC-01-photo-upload: ER diagram after V2 migration
+%% Source of truth:
+%%   src/backend/src/main/resources/db/migration/V1__init_schema.sql (V1 baseline)
+%%   src/backend/src/main/resources/db/migration/V2__add_spaces_status_and_photo.sql (V2 delta)
+%%   src/backend/src/main/java/com/authenticself/domain/Space.java
+%% PRD refs: PRD section 3 (DB design), PRD section 7 (cardinalities), PRD section 9.
+%%
+%% Notation: V1 columns retained as-is except where V2 MODIFIED them to NULL.
+%% V2 additions are tagged "V2-add". V1->V2 nullability relaxations are tagged
+%% "V1->V2 NULL". Other V1 tables (users, furniture, wishlist) unchanged by this task.
+
+erDiagram
+    users     ||--o{ spaces   : "uploads / analyzes (FR-4, AC-9)"
+    users     ||--o{ wishlist : "owns (Task 1 baseline)"
+    furniture ||--o{ wishlist : "contains (Task 1 baseline)"
+
+    users {
+        VARCHAR_64  user_id     PK "Task 1 V1"
+        VARCHAR_100 name           "Task 1 V1 NOT NULL"
+        VARCHAR_255 email       UK "Task 1 V1 UNIQUE"
+        TIMESTAMP   created_at     "Task 1 V1 DEFAULT CURRENT_TIMESTAMP"
+        TIMESTAMP   updated_at     "Task 1 V1 ON UPDATE"
+    }
+
+    spaces {
+        VARCHAR_64  room_id           PK "V1 - unchanged"
+        VARCHAR_64  user_id           FK "V1 fk_spaces_user CASCADE"
+        VARCHAR_512 photo_url            "V2-add NOT NULL (FR-0 op1, FR-4, AC-3)"
+        VARCHAR_255 original_filename    "V2-add NULL (FR-0 op2)"
+        VARCHAR_64  content_type         "V2-add NOT NULL (FR-0 op3, AC-3)"
+        BIGINT      file_size_bytes      "V2-add NOT NULL (FR-0 op4, AC-3)"
+        ENUM        status               "V2-add ENUM(PENDING_ANALYSIS,ANALYZED,FAILED) NOT NULL DEFAULT PENDING_ANALYSIS (FR-0 op5, AC-3)"
+        DATETIME    uploaded_at          "V2-add NOT NULL DEFAULT CURRENT_TIMESTAMP (FR-0 op6, AC-3)"
+        VARCHAR_100 dimensions           "V1 -> V2 NULL (FR-0 op7, AC-4) - AI-populated"
+        VARCHAR_32  main_color           "V1 -> V2 NULL (FR-0 op8, AC-4) - AI-populated"
+        VARCHAR_64  style                "V1 -> V2 NULL (FR-0 op9, AC-4) - AI-populated"
+        DATETIME    analysis_date        "V1 -> V2 NULL (FR-0 op10, AC-4) - AI-populated"
+    }
+
+    furniture {
+        VARCHAR_64  furniture_id  PK "Task 1 V1"
+        VARCHAR_32  type             "Task 1 V1 idx_furniture_type_style"
+        VARCHAR_64  style            "Task 1 V1 idx_furniture_type_style"
+        VARCHAR_100 size             "Task 1 V1"
+    }
+
+    wishlist {
+        VARCHAR_64  wishlist_id  PK "Task 1 V1"
+        VARCHAR_64  user_id      FK "Task 1 V1 fk_wishlist_user CASCADE"
+        VARCHAR_64  furniture_id FK "Task 1 V1 fk_wishlist_furniture RESTRICT"
+        VARCHAR_32  category        "Task 1 V1 NOT NULL"
+        INT         price           "Task 1 V1 NOT NULL"
+        ENUM        status          "Task 1 V1 ENUM Active|Purchased"
+        TIMESTAMP   created_at      "Task 1 V1"
+        TIMESTAMP   updated_at      "Task 1 V1 ON UPDATE"
+    }
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% V2 delta on spaces (this task):
+%%   ADD  photo_url          VARCHAR(512) NOT NULL ...... FR-0 op1, AC-3
+%%   ADD  original_filename  VARCHAR(255) NULL ........... FR-0 op2, AC-3
+%%   ADD  content_type       VARCHAR(64)  NOT NULL ....... FR-0 op3, AC-3
+%%   ADD  file_size_bytes    BIGINT       NOT NULL ....... FR-0 op4, AC-3
+%%   ADD  status             ENUM(...) NOT NULL DEFAULT PENDING_ANALYSIS
+%%                                                        FR-0 op5, AC-3
+%%   ADD  uploaded_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+%%                                                        FR-0 op6, AC-3
+%%   MOD  dimensions         VARCHAR(100) NULL ............ FR-0 op7, AC-4
+%%   MOD  main_color         VARCHAR(32)  NULL ............ FR-0 op8, AC-4
+%%   MOD  style              VARCHAR(64)  NULL ............ FR-0 op9, AC-4
+%%   MOD  analysis_date      DATETIME     NULL ............ FR-0 op10, AC-4
+%%   NEW  INDEX idx_spaces_status ON spaces(status) ....... FR-0 op11, AC-5
+%%
+%% V1 baseline preserved (AC-22 - no regression):
+%%   spaces PK(room_id), FK(user_id) -> users(user_id),
+%%   idx_spaces_user_id still present.
+%%
+%% Cardinalities (PRD section 7):
+%%   users(1) --o{ spaces(0..*) - user uploads/analyzes rooms ..... FR-4
+%%   users(1) --o{ wishlist(0..*) - Task 1 baseline
+%%   furniture(1) --o{ wishlist(0..*) - Task 1 baseline
+%%
+%% Tables outside spaces are unchanged by this task.

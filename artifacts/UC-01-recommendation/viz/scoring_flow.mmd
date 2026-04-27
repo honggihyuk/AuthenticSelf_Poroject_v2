@@ -1,0 +1,157 @@
+%% AuthenticSelf - UC-01-recommendation: scoring flow (cross-validation)
+%%
+%% Describes the deterministic rule-based scorer applied per catalog item.
+%% Sources (FR refs):
+%%   FR-4   resolve_style()            preferredStyle + detectedStyle -> resolvedStyle
+%%   FR-5   score_size_fit()           hard-fit gate + soft banding
+%%   FR-7   score_style_match()        exact / compatible pair / other
+%%   FR-6   score_color_harmony()      HSL hue-delta + neutral bump
+%%   FR-8   score_object_conflict()    lighting exempt
+%%   FR-9   aggregate + rank           weighted sum + multi-key tie-breaker
+%%   FR-10  compose_rationale()        Korean segments
+%%   FR-12  NO_FIT_ANY_CATEGORY        warning returned on HTTP 200
+%%
+%% Source of truth:
+%%   src/ai/app/analyzers/recommender.py  (all scoring functions + rank)
+%%   src/ai/app/routes/recommend.py        (NO_FIT decision branch)
+%%
+%% Read top-to-bottom: for each catalog item, follow the gate in order;
+%% items are either DROPPED (hard-fit fail) or flow to the aggregate.
+
+flowchart TD
+    Start([Start: POST /recommend/furniture<br/>body validated by Pydantic<br/>FR-2]):::startend
+
+    Start --> CE{catalog == [ ]?<br/>FR-12}
+    CE -- yes --> RAISE_CE([throw CatalogEmptyError<br/>HTTP 422 CATALOG_EMPTY<br/>AC-20]):::errorend
+    CE -- no --> RS
+
+    RS["resolve_style(preferredStyle, detectedStyle)<br/>FR-4 / AC-16..AC-18"]:::proc
+    RS --> RSDec{preferredStyle == CURRENT?}
+    RSDec -- no --> RS_explicit[resolvedStyle = preferredStyle<br/>always one of MODERN/SIMPLE/CLASSIC/<br/>SCANDINAVIAN/INDUSTRIAL]:::proc
+    RSDec -- yes --> RSDec2{detectedStyle is null?}
+    RSDec2 -- no --> RS_detected[resolvedStyle = detectedStyle<br/>AC-16]:::proc
+    RSDec2 -- yes --> RS_default[resolvedStyle = MODERN<br/>documented fallback AC-17]:::proc
+    RS_explicit --> Loop
+    RS_detected --> Loop
+    RS_default --> Loop
+
+    Loop[[for item in catalog<br/>FR-3 CATEGORY_KEYS=<br/>desk/bed/chair/lighting]]:::loop
+
+    Loop --> SF1
+
+    %% ---------- SIZE FIT (FR-5) ----------
+    subgraph SF["Size fit gate - FR-5 / AC-5 / AC-6 / AC-40"]
+        direction TB
+        SF1["roomW = widthM*100 cm<br/>roomL = lengthM*100 cm<br/>roomH = heightM*100 cm"]:::proc
+        SF1 --> SF2["item_long = max(widthCm, lengthCm)<br/>item_short = min(widthCm, lengthCm)"]:::proc
+        SF2 --> SF3{item_long <= min(roomW,roomL)-30<br/>AND heightCm <= roomH-20<br/>AND item_short > 0<br/>AND heightCm > 0 ?}
+        SF3 -- no --> SFX([DROP item from ranking<br/>hard-fit fail<br/>AC-5 / AC-40]):::drop
+        SF3 -- yes --> SF4["footprint = widthCm*lengthCm / (roomW*roomL)"]:::proc
+        SF4 --> SF5{item.type == 'bed' ?}
+        SF5 -- yes --> SF_bed[sizeFit bands SHIFTED UP one tier<br/>&lt;=0.35 &rarr; 1.0<br/>&lt;=0.50 &rarr; 0.7<br/>&lt;=0.65 &rarr; 0.4<br/>else 0.1]:::proc
+        SF5 -- no --> SF_norm[sizeFit bands<br/>&lt;=0.20 &rarr; 1.0<br/>&lt;=0.35 &rarr; 0.7<br/>&lt;=0.50 &rarr; 0.4<br/>else 0.1]:::proc
+    end
+
+    SFX -.-> SkipAgg([skip this item]):::drop
+    SF_bed --> SM1
+    SF_norm --> SM1
+
+    %% ---------- STYLE MATCH (FR-7) ----------
+    subgraph SM["Style match - FR-7 / AC-7..AC-9"]
+        direction TB
+        SM1{resolvedStyle in item.styleTags ?}
+        SM1 -- yes --> SM_exact[styleMatch = 1.00<br/>AC-7]:::proc
+        SM1 -- no --> SM2{any tag pairs with<br/>resolvedStyle in<br/>_COMPATIBLE_PAIRS ?<br/>(MODERN-SCANDINAVIAN,<br/>MODERN-SIMPLE,<br/>SIMPLE-SCANDINAVIAN,<br/>CLASSIC-INDUSTRIAL)}
+        SM2 -- yes --> SM_compat[styleMatch = 0.50<br/>AC-8]:::proc
+        SM2 -- no --> SM_none[styleMatch = 0.10<br/>AC-9]:::proc
+    end
+
+    SM_exact --> CH1
+    SM_compat --> CH1
+    SM_none --> CH1
+
+    %% ---------- COLOR HARMONY (FR-6) ----------
+    subgraph CH["Color harmony - FR-6 / AC-10 / AC-11"]
+        direction TB
+        CH1["hex -> rgb01 -> HSL for both<br/>room.mainColor and item.colorHex"]:::proc
+        CH1 --> CH2["hueDelta = min(|h1-h2|, 360-|h1-h2|)<br/>on short arc, degrees"]:::proc
+        CH2 --> CH3{"bucket hueDelta"}
+        CH3 -- "&lt;=15" --> CH_100[score=1.00<br/>analogous / same<br/>AC-10]:::proc
+        CH3 -- "&lt;=30" --> CH_85[score=0.85]:::proc
+        CH3 -- "&lt;=60" --> CH_70[score=0.70]:::proc
+        CH3 -- "&lt;=120" --> CH_55[score=0.55]:::proc
+        CH3 -- "&gt;120" --> CH_40[score=0.40<br/>clashing<br/>AC-11]:::proc
+        CH_100 --> CH4
+        CH_85 --> CH4
+        CH_70 --> CH4
+        CH_55 --> CH4
+        CH_40 --> CH4
+        CH4{saturation s1 &lt; 0.15<br/>OR s2 &lt; 0.15 ?<br/>near-neutral}
+        CH4 -- yes --> CH_bump[colorHarmony = min(1.0, score+0.15)]:::proc
+        CH4 -- no --> CH_keep[colorHarmony = score]:::proc
+    end
+
+    CH_bump --> OC1
+    CH_keep --> OC1
+
+    %% ---------- OBJECT CONFLICT (FR-8) ----------
+    subgraph OC["Object conflict - FR-8 / AC-12 / AC-13"]
+        direction TB
+        OC1{item.type == 'lighting' ?}
+        OC1 -- yes --> OC_light[objectConflict = 1.00<br/>lighting ALWAYS exempt<br/>AC-13]:::proc
+        OC1 -- no --> OC2{exists det in detectedObjects<br/>with det.type == item.type<br/>AND det.confidence &gt;= 0.5 ?}
+        OC2 -- yes --> OC_conflict[objectConflict = 0.20<br/>existing-furniture penalty<br/>AC-12]:::proc
+        OC2 -- no --> OC_none[objectConflict = 1.00]:::proc
+    end
+
+    OC_light --> AG1
+    OC_conflict --> AG1
+    OC_none --> AG1
+
+    %% ---------- AGGREGATE + RATIONALE (FR-9 / FR-10) ----------
+    AG1["fitScore = round(<br/>&nbsp;0.35*sizeFit + 0.30*styleMatch<br/>+ 0.20*colorHarmony + 0.15*objectConflict,<br/>2)<br/>FR-9 / AC-15"]:::agg
+    AG1 --> AG2["compose_rationale(...)<br/>Korean segments joined by ', '<br/>truncated at 120 chars<br/>FR-10"]:::agg
+    AG2 --> AG3[push ScoredItem to buckets type-bucket<br/>desk / bed / chair / lighting<br/>FR-3]:::agg
+
+    AG3 --> Loop
+
+    Loop --> RK
+
+    RK["per category: sort by<br/>(-fitScore, price, furnitureId)<br/>FR-9 / AC-14 / AC-41<br/>truncate to topNPerCategory"]:::proc
+    RK --> NF{every category<br/>bucket empty ?}
+
+    NF -- yes --> NoFit(["warning = 'NO_FIT_ANY_CATEGORY'<br/>response still HTTP 200<br/>FR-12 / AC-19 / AC-47"]):::warnend
+    NF -- no --> OkEnd(["warning = null<br/>200 RecommendResponse<br/>{recommendations:{desk,bed,chair,lighting},<br/>resolvedStyle, generatedAt, processingMs}<br/>AC-2"]):::okend
+
+    %% -----------------------------------------------------------------
+    %% Error fork from inside the scorer
+    %% -----------------------------------------------------------------
+    AG1 -.->|"unexpected exception inside rank()"| CrashFork[[catch Exception<br/>re-raise as RecommendationFailedError<br/>FR-12]]:::errorend
+    CrashFork -.-> RAISE_RF([HTTP 422 RECOMMENDATION_FAILED]):::errorend
+
+    classDef startend fill:#d4edda,stroke:#28a745,color:#155724,stroke-width:2px;
+    classDef okend   fill:#d4edda,stroke:#28a745,color:#155724,stroke-width:2px;
+    classDef warnend fill:#fff3cd,stroke:#d39e00,color:#856404,stroke-width:2px;
+    classDef errorend fill:#f8d7da,stroke:#c5324b,color:#721c24,stroke-width:2px;
+    classDef drop    fill:#f8d7da,stroke:#c5324b,color:#721c24,stroke-dasharray:4 3;
+    classDef proc    fill:#cfe2ff,stroke:#0d6efd,color:#052c65;
+    classDef agg     fill:#e4d4f5,stroke:#7a3ec5,color:#3d1b64,stroke-width:2px;
+    classDef loop    fill:#ffe8cc,stroke:#d97706,color:#7c2d12,stroke-width:2px;
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% Empty-catalog early exit ................. FR-12 / AC-20
+%% resolve_style() CURRENT fallback ......... FR-4 / AC-16 / AC-17 / AC-18
+%% Size hard-fit drop (NOT scored 0) ........ FR-5 / AC-5 / AC-40
+%% Size soft-fit banding (bed +1 tier) ...... FR-5 / AC-6
+%% Style exact / compat / none .............. FR-7 / AC-7 / AC-8 / AC-9
+%% Color hue-delta bucket + neutral bump .... FR-6 / AC-10 / AC-11
+%% Lighting exempt from conflict ............ FR-8 / AC-13
+%% Existing-furniture 0.20 penalty .......... FR-8 / AC-12
+%% Weighted aggregate 0.35/0.30/0.20/0.15 ... FR-9 / AC-15
+%% Rationale Korean compose ................. FR-10
+%% Multi-key tie-breaker .................... FR-9 / AC-14 / AC-41
+%% Top-N truncation ......................... FR-9
+%% NO_FIT_ANY_CATEGORY warning (200) ........ FR-12 / AC-19
+%% RECOMMENDATION_FAILED 422 ................ FR-12

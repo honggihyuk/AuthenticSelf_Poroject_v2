@@ -1,0 +1,59 @@
+%% AuthenticSelf — DB-schema-init: Flyway bootstrap sequence
+%% Source of truth: src/backend/src/main/java/com/authenticself/AuthenticSelfApplication.java
+%%                  src/backend/src/main/resources/application.yml
+%%                  src/backend/src/main/resources/db/migration/V1__init_schema.sql
+%% PRD refs: §4 (Spring + MySQL), §9 (architecture data layer)
+%% Scope:    startup-time schema bootstrap only. No user-facing flow
+%%           exists for this task (no controllers, no APIs).
+
+sequenceDiagram
+    autonumber
+    actor Dev as Developer / CI
+    participant App as AuthenticSelfApplication<br/>(@SpringBootApplication)
+    participant FW as Flyway<br/>(spring.flyway.enabled=true)
+    participant FS as classpath:db/migration
+    participant MY as MySQL 8<br/>(schema=authenticself)
+    participant HB as Hibernate<br/>(ddl-auto=validate)
+    participant JPA as @Entity stubs<br/>(User/Space/Furniture/Wishlist)
+
+    Dev->>App: gradlew bootRun (DB_URL/DB_USER/DB_PASSWORD set)
+    App->>App: SpringApplication.run(...)
+    App->>FW: auto-configure DataSource + Flyway bean
+    FW->>MY: connect + ensure flyway_schema_history exists
+    MY-->>FW: history table ready
+
+    FW->>FS: scan classpath:db/migration/V*.sql
+    FS-->>FW: found V1__init_schema.sql (FR-5, AC-14)
+
+    FW->>MY: BEGIN migration v1
+    Note over FW,MY: CREATE TABLE users (FR-1, AC-2)<br/>CREATE TABLE furniture (FR-3, AC-4)<br/>CREATE TABLE spaces + FK+idx (FR-2, AC-3, AC-7, AC-12)<br/>CREATE TABLE wishlist + 2 FKs + ENUM + idx<br/>(FR-4, AC-5, AC-8, AC-9, AC-10, AC-11, AC-13)
+    MY-->>FW: all 4 CREATE TABLE OK<br/>(InnoDB + utf8mb4_unicode_ci — FR-7, AC-16)
+    FW->>MY: INSERT INTO flyway_schema_history<br/>(version=1, description='init schema', success=1)
+    MY-->>FW: history row committed (AC-14)
+
+    App->>HB: EntityManagerFactory init
+    HB->>JPA: scan com.authenticself.domain.*
+    JPA-->>HB: 4 stubs: User / Space / Furniture / Wishlist (FR-8, AC-17)
+    HB->>MY: validate columns match @Entity mappings
+    MY-->>HB: schema matches — OK
+
+    App-->>Dev: Started AuthenticSelfApplication on :8080
+
+    alt Migration fails mid-way (NFR error-handling)
+        FW->>MY: mark flyway_schema_history row success=0
+        FW-->>App: throw FlywayException
+        App-->>Dev: abort startup (no silent partial schema)
+    end
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% Step 1-3   : Spring Boot entrypoint wiring
+%% Step 4-5   : Flyway bean auto-config (application.yml: flyway.enabled=true)
+%% Step 6-7   : Migration discovery — AC-14 (exactly one V1__*.sql file)
+%% Step 8-10  : DDL execution — FR-1..FR-4, FR-7, AC-1..AC-6, AC-12, AC-13, AC-16
+%% Step 11-12 : Flyway version bookkeeping — AC-14
+%% Step 13-16 : Hibernate validate mode — FR-8, AC-17
+%%              (ddl-auto=validate ensures Hibernate never mutates the schema —
+%%               Flyway is the sole schema owner per design decision D1)
+%% alt branch : NFR "error-handling" — failed migration aborts startup

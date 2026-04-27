@@ -1,0 +1,86 @@
+%% AuthenticSelf - UC-03-admin-overview: admin authorization state machine
+%% Three-stage gate in AdminAuthorizer.requireAdmin, throw-order pinned by
+%% AdminAuthorizerTest so the caller always sees the most specific error first.
+%%
+%% Source of truth:
+%%   src/backend/src/main/java/com/authenticself/admin/AdminAuthorizer.java
+%%   src/backend/src/main/java/com/authenticself/admin/AdminController.java
+%%     (requireAdmin is the FIRST statement of every handler - AC-8)
+%%   src/backend/src/main/java/com/authenticself/admin/TimeWindow.java
+%%     (TimeWindow.parse runs AFTER requireAdmin so bad windows never
+%%      leak admin existence)
+%%
+%% Tests pinning each transition:
+%%   AdminAuthorizerTest#nullHeader_ac7       -> MISSING_USER_HEADER branch  (AC-7, AC-27)
+%%   AdminAuthorizerTest#unknownUser_ac7      -> USER_NOT_FOUND branch       (AC-7, AC-27)
+%%   AdminAuthorizerTest#nonAdminRole_ac7     -> NOT_ADMIN branch            (AC-7, AC-26)
+%%   AdminAuthorizerTest#adminRole_ac7        -> AUTHORIZED terminal         (AC-7)
+%%   AdminControllerAuthTest#authorizerCalledFirst_ac8      (AC-8)
+%%   AdminControllerAuthTest#nonAdminGets403OnEveryEndpoint_ac26 (AC-26)
+%%   AdminControllerAuthTest#missingHeaderAndUnknownUser_ac27    (AC-27)
+
+stateDiagram-v2
+    direction TB
+
+    [*] --> REQUEST_RECEIVED : HTTP GET /api/v1/admin/*<br/>AdminController handler entered<br/>FR-4..FR-8 / AC-8
+
+    REQUEST_RECEIVED --> HEADER_CHECK : AdminController<br/>first statement:<br/>authorizer.requireAdmin(userId)<br/>(AC-8 - never reordered)
+
+    %% ------------------------------------------------------------------
+    %% Stage 1 - header presence
+    %% ------------------------------------------------------------------
+    HEADER_CHECK --> USER_LOOKUP : userIdHeader != null<br/>AND !userIdHeader.isBlank()
+    HEADER_CHECK --> REJECT_400_MISSING : null OR blank<br/>throw AdminException(MISSING_USER_HEADER)<br/>(AC-7 branch 1, pinned by AdminAuthorizerTest#nullHeader_ac7,<br/> AC-27 pinned by AdminControllerAuthTest#missingHeaderAndUnknownUser_ac27)
+
+    %% ------------------------------------------------------------------
+    %% Stage 2 - user existence
+    %% ------------------------------------------------------------------
+    USER_LOOKUP --> ROLE_CHECK : userRepository.findById(userId).isPresent()
+    USER_LOOKUP --> REJECT_404_UNKNOWN : Optional.empty()<br/>throw AdminException(USER_NOT_FOUND)<br/>(AC-7 branch 2, pinned by AdminAuthorizerTest#unknownUser_ac7,<br/> AC-27 pinned by AdminControllerAuthTest#missingHeaderAndUnknownUser_ac27)
+
+    %% ------------------------------------------------------------------
+    %% Stage 3 - role check
+    %% ------------------------------------------------------------------
+    ROLE_CHECK --> AUTHORIZED : user.getRole() == User.Role.ADMIN<br/>(AC-7 branch 4 - return normally)
+    ROLE_CHECK --> REJECT_403_NOT_ADMIN : user.getRole() != User.Role.ADMIN<br/>throw AdminException(NOT_ADMIN)<br/>(AC-7 branch 3, pinned by AdminAuthorizerTest#nonAdminRole_ac7,<br/> AC-26 pinned by AdminControllerAuthTest#nonAdminGets403OnEveryEndpoint_ac26)
+
+    %% ------------------------------------------------------------------
+    %% Post-auth window parsing (runs AFTER role check)
+    %% ------------------------------------------------------------------
+    AUTHORIZED --> WINDOW_PARSE : TimeWindow.parse(windowRaw)<br/>case-insensitive, default ALL
+    WINDOW_PARSE --> SERVICE_CALL : valid enum value<br/>( LAST_7D | LAST_30D | ALL )
+    WINDOW_PARSE --> REJECT_400_INVALID_WINDOW : not in enum<br/>throw AdminException(INVALID_TIME_WINDOW)<br/>(AC-11 pinned by AdminControllerTest#invalidAndCaseInsensitiveWindow_ac11)
+
+    SERVICE_CALL --> [*] : 200 OK<br/>AdminOverviewService returns tile DTO<br/>AdminExceptionAdvice NOT invoked<br/>(AC-9 / AC-53)
+
+    %% ------------------------------------------------------------------
+    %% All rejection terminals funnel through AdminExceptionAdvice
+    %% ------------------------------------------------------------------
+    REJECT_400_MISSING         --> [*] : AdminExceptionAdvice.handleAdmin<br/>-> 400 { errorCode:'MISSING_USER_HEADER',<br/>         message:'사용자 인증 정보가 없습니다.',<br/>         correlationId:UUID }
+    REJECT_404_UNKNOWN         --> [*] : AdminExceptionAdvice.handleAdmin<br/>-> 404 { errorCode:'USER_NOT_FOUND',<br/>         message:'사용자를 찾을 수 없습니다.',<br/>         correlationId:UUID }
+    REJECT_403_NOT_ADMIN       --> [*] : AdminExceptionAdvice.handleAdmin<br/>-> 403 { errorCode:'NOT_ADMIN',<br/>         message:'관리자 권한이 필요합니다.',<br/>         correlationId:UUID }
+    REJECT_400_INVALID_WINDOW  --> [*] : AdminExceptionAdvice.handleAdmin<br/>-> 400 { errorCode:'INVALID_TIME_WINDOW',<br/>         message:'기간 필터 값이 올바르지 않습니다. (LAST_7D, LAST_30D, ALL)',<br/>         correlationId:UUID }
+
+    note right of HEADER_CHECK
+        Ordering guarantee (AC-7):
+          stage 1 NEVER hits the DB.
+          stage 2 NEVER probes a role.
+          stage 3 only runs when user is present.
+        Verified by verify(repo, never()).findById(any())
+        in AdminAuthorizerTest#nullHeader_ac7.
+    end note
+
+    note right of AUTHORIZED
+        Only when stage 3 passes does the controller
+        proceed to TimeWindow.parse and the service call.
+        A bad window value on a non-admin request
+        still returns 403 NOT_ADMIN (not 400), because
+        requireAdmin is invoked BEFORE parse.
+    end note
+
+    note left of SERVICE_CALL
+        AdminOverviewService logs exactly one INFO line:
+          op=overview|users|rooms|wishlist|sales
+          window=<name>  userId=<opaque>  durationMs=<n>
+        (AC-51) - no email, no name (AC-41).
+    end note

@@ -1,0 +1,86 @@
+%% AuthenticSelf - UC-01-style-selection: ER diagram after V3 migration
+%%
+%% Delta from artifacts/UC-01-photo-upload/viz/er.mmd (V1 + V2):
+%%   V3 adds `spaces.preferred_style VARCHAR(32) NULL` (Task 4 FR-9 / AC-9)
+%%   NO other table / column changes.
+%%
+%% Source of truth:
+%%   src/backend/src/main/resources/db/migration/V1__init_schema.sql (V1 baseline)
+%%   src/backend/src/main/resources/db/migration/V2__add_spaces_status_and_photo.sql (V2 delta - Task 2)
+%%   src/backend/src/main/resources/db/migration/V3__add_preferred_style.sql (V3 delta - Task 4)
+%%   src/backend/src/main/java/com/authenticself/domain/Space.java
+%% PRD refs: PRD section 3 (DB design), PRD section 7 (cardinalities), PRD section 9.
+%%
+%% Notation:
+%%   "V3-add" = new column in this task.
+%%   "V2-add" / "V2-mod" / "V1-*" preserved from prior tasks as-is.
+
+erDiagram
+    users     ||--o{ spaces   : "uploads / analyzes (Task 2 FR-4)"
+    users     ||--o{ wishlist : "owns (Task 1 baseline)"
+    furniture ||--o{ wishlist : "contains (Task 1 baseline)"
+
+    users {
+        VARCHAR_64  user_id     PK "Task 1 V1"
+        VARCHAR_100 name           "Task 1 V1 NOT NULL"
+        VARCHAR_255 email       UK "Task 1 V1 UNIQUE"
+        TIMESTAMP   created_at     "Task 1 V1 DEFAULT CURRENT_TIMESTAMP"
+        TIMESTAMP   updated_at     "Task 1 V1 ON UPDATE"
+    }
+
+    spaces {
+        VARCHAR_64  room_id           PK "V1 - unchanged"
+        VARCHAR_64  user_id           FK "V1 fk_spaces_user CASCADE"
+        VARCHAR_512 photo_url            "V2-add NOT NULL (Task 2 FR-4)"
+        VARCHAR_255 original_filename    "V2-add NULL"
+        VARCHAR_64  content_type         "V2-add NOT NULL"
+        BIGINT      file_size_bytes      "V2-add NOT NULL"
+        ENUM        status               "V2-add ENUM(PENDING_ANALYSIS,ANALYZED,FAILED) NOT NULL DEFAULT PENDING_ANALYSIS"
+        DATETIME    uploaded_at          "V2-add NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        VARCHAR_100 dimensions           "V1 -> V2 NULL - AI-populated (Task 3 markAnalyzed)"
+        VARCHAR_32  main_color           "V1 -> V2 NULL - AI-populated (Task 3 markAnalyzed)"
+        VARCHAR_64  style                "V1 -> V2 NULL - AI-populated (Task 4 markAnalyzed with style)"
+        VARCHAR_32  preferred_style      "V3-add NULL - USER-chosen (Task 4 FR-9 / AC-9)"
+        DATETIME    analysis_date        "V1 -> V2 NULL - AI-populated"
+    }
+
+    furniture {
+        VARCHAR_64  furniture_id  PK "Task 1 V1"
+        VARCHAR_32  type             "Task 1 V1 idx_furniture_type_style"
+        VARCHAR_64  style            "Task 1 V1 idx_furniture_type_style"
+        VARCHAR_100 size             "Task 1 V1"
+    }
+
+    wishlist {
+        VARCHAR_64  wishlist_id  PK "Task 1 V1"
+        VARCHAR_64  user_id      FK "Task 1 V1 fk_wishlist_user CASCADE"
+        VARCHAR_64  furniture_id FK "Task 1 V1 fk_wishlist_furniture RESTRICT"
+        VARCHAR_32  category        "Task 1 V1 NOT NULL"
+        INT         price           "Task 1 V1 NOT NULL"
+        ENUM        status          "Task 1 V1 ENUM Active|Purchased"
+        TIMESTAMP   created_at      "Task 1 V1"
+        TIMESTAMP   updated_at      "Task 1 V1 ON UPDATE"
+    }
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% V3 delta on spaces (this task):
+%%   ADD  preferred_style VARCHAR(32) NULL AFTER style ......... FR-9 / AC-9
+%%        Six legal values (CURRENT | MODERN | SIMPLE | CLASSIC
+%%                          | SCANDINAVIAN | INDUSTRIAL).
+%%        VARCHAR(32) covers the longest enum name (SCANDINAVIAN=12)
+%%        with headroom for future additions.
+%%        No index — per-row lookup by room_id only.
+%%        Nullable so the row can represent "user has not yet picked".
+%%
+%% V2 / V1 baselines preserved (Task 4 AC-36 "no regression"):
+%%   All columns/types/defaults from V2 and V1 unchanged.
+%%   The Flyway history table (flyway_schema_history) gains one new row for V3.
+%%
+%% Cardinalities (PRD section 7) - unchanged:
+%%   users(1) --o{ spaces(0..*)
+%%   users(1) --o{ wishlist(0..*)
+%%   furniture(1) --o{ wishlist(0..*)
+%%
+%% Tables outside `spaces` are unchanged by this task.

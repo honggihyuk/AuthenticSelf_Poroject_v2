@@ -1,0 +1,302 @@
+openapi: 3.0.3
+info:
+  title: AuthenticSelf — UC-02-wishlist API contract
+  version: "0.6.0"
+  description: |
+    Contract for the four wishlist endpoints introduced by Task 6
+    (UC-02-wishlist):
+
+      * POST   /api/v1/wishlist                 — add (idempotent on
+                                                   (userId, furnitureId))
+      * GET    /api/v1/wishlist?status=...      — list, optionally filtered
+      * PATCH  /api/v1/wishlist/{wishlistId}    — state transition
+                                                   (ACTIVE ↔ PURCHASED)
+      * DELETE /api/v1/wishlist/{wishlistId}    — hard delete
+
+    Every endpoint requires an `X-User-Id` header (stub-auth identical to
+    the UC-01 pattern). Every non-2xx response carries the shared
+    `SpringErrorResponse` envelope `{errorCode, message, correlationId}`.
+
+servers:
+  - url: http://localhost:8080
+    description: Spring public API
+
+tags:
+  - name: wishlist
+    description: Public wishlist endpoints consumed by the RN client.
+
+paths:
+  # =================================================================
+  # POST /api/v1/wishlist  — add (idempotent)
+  # =================================================================
+  /api/v1/wishlist:
+    post:
+      tags: [wishlist]
+      operationId: addToWishlist
+      summary: Add a furniture item to the user's wishlist.
+      description: |
+        Idempotent on `(userId, furnitureId)`. A duplicate POST returns
+        the existing row with `alreadyExists=true` and HTTP 200 — it
+        NEVER re-inserts nor resets status/addedAt/price. A first-time
+        POST returns HTTP 201 with `alreadyExists=false`.
+      parameters:
+        - $ref: '#/components/parameters/XUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddWishlistRequest'
+            example:
+              furnitureId: "f_desk_001"
+              category: "desk"
+              price: 189000
+      responses:
+        '201':
+          description: New wishlist row created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddWishlistResponse'
+        '200':
+          description: Idempotent hit — existing row returned unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddWishlistResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    # =================================================================
+    # GET /api/v1/wishlist?status=ACTIVE|PURCHASED
+    # =================================================================
+    get:
+      tags: [wishlist]
+      operationId: listWishlist
+      summary: List the user's wishlist, optionally filtered by status.
+      parameters:
+        - $ref: '#/components/parameters/XUserId'
+        - name: status
+          in: query
+          required: false
+          description: |
+            Optional case-insensitive filter. When absent, returns
+            both states concatenated (ACTIVE first, each sub-list
+            sorted by `updated_at DESC`).
+          schema:
+            $ref: '#/components/schemas/WishlistStatus'
+      responses:
+        '200':
+          description: Wishlist items + per-state totals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WishlistListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # =================================================================
+  # PATCH /api/v1/wishlist/{wishlistId}
+  # DELETE /api/v1/wishlist/{wishlistId}
+  # =================================================================
+  /api/v1/wishlist/{wishlistId}:
+    parameters:
+      - name: wishlistId
+        in: path
+        required: true
+        schema: { type: string, maxLength: 64 }
+
+    patch:
+      tags: [wishlist]
+      operationId: patchWishlist
+      summary: Transition an item between ACTIVE and PURCHASED.
+      description: |
+        Allowed transitions — ACTIVE → PURCHASED (sets purchasedAt),
+        PURCHASED → ACTIVE (clears purchasedAt). Same-state PATCH is an
+        idempotent no-op (200, row unchanged). Any other value raises
+        400 `INVALID_STATE_TRANSITION`.
+      parameters:
+        - $ref: '#/components/parameters/XUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchWishlistRequest'
+            example:
+              status: "PURCHASED"
+      responses:
+        '200':
+          description: Updated wishlist item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WishlistItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [wishlist]
+      operationId: deleteWishlist
+      summary: Hard-delete a wishlist item.
+      parameters:
+        - $ref: '#/components/parameters/XUserId'
+      responses:
+        '204':
+          description: Deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  # -----------------------------------------------------------------
+  # Reusable parameters
+  # -----------------------------------------------------------------
+  parameters:
+    XUserId:
+      name: X-User-Id
+      in: header
+      required: true
+      description: |
+        Stub-auth user identifier. Missing / blank → 400
+        `MISSING_USER_HEADER` (same code emitted by UC-01 endpoints).
+      schema: { type: string, minLength: 1, maxLength: 64 }
+
+  # -----------------------------------------------------------------
+  # Reusable error responses
+  # -----------------------------------------------------------------
+  responses:
+    BadRequest:
+      description: Validation / missing-header / invalid-transition.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SpringErrorResponse'
+    NotFound:
+      description: User / furniture / wishlist row not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SpringErrorResponse'
+
+  # -----------------------------------------------------------------
+  # Schemas
+  # -----------------------------------------------------------------
+  schemas:
+
+    # -------------------- Enums --------------------
+    WishlistStatus:
+      type: string
+      enum: [ACTIVE, PURCHASED]
+      description: |
+        UPPER_SNAKE casing on the REST surface. Internally the DB keeps
+        the V1 `ENUM('Active','Purchased')` casing; the response's
+        `status` field echoes the DB casing unchanged.
+
+    WishlistDbStatus:
+      type: string
+      enum: [Active, Purchased]
+      description: DB-level casing echoed by GET / PATCH responses.
+
+    FurnitureType:
+      type: string
+      enum: [desk, bed, chair, lighting]
+      description: Shared with UC-01-recommendation api_contract.
+
+    WishlistErrorCode:
+      type: string
+      enum:
+        - INVALID_WISHLIST_PAYLOAD
+        - INVALID_WISHLIST_STATUS_FILTER
+        - INVALID_STATE_TRANSITION
+        - MISSING_USER_HEADER
+        - USER_NOT_FOUND
+        - FURNITURE_NOT_FOUND
+        - WISHLIST_ITEM_NOT_FOUND
+        - WISHLIST_LIMIT_EXCEEDED
+
+    # -------------------- Request bodies --------------------
+    AddWishlistRequest:
+      type: object
+      required: [furnitureId, category, price]
+      properties:
+        furnitureId: { type: string, minLength: 1, maxLength: 64 }
+        category:    { $ref: '#/components/schemas/FurnitureType' }
+        price:       { type: integer, minimum: 0 }
+
+    PatchWishlistRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/WishlistStatus' }
+
+    # -------------------- Response bodies --------------------
+    FurnitureSnapshot:
+      type: object
+      nullable: true
+      required: [name, colorHex, type]
+      properties:
+        name:     { type: string }
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+        colorHex: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        type:     { type: string }
+
+    WishlistItem:
+      type: object
+      required:
+        [wishlistId, userId, furnitureId, category, price, status, addedAt,
+         purchasedAt, furnitureSnapshot, alreadyExists]
+      properties:
+        wishlistId:        { type: string, maxLength: 64 }
+        userId:            { type: string, maxLength: 64 }
+        furnitureId:       { type: string, maxLength: 64 }
+        category:          { $ref: '#/components/schemas/FurnitureType' }
+        price:             { type: integer, minimum: 0 }
+        status:            { $ref: '#/components/schemas/WishlistDbStatus' }
+        addedAt:           { type: string, format: date-time }
+        purchasedAt:
+          type: string
+          format: date-time
+          nullable: true
+        furnitureSnapshot: { $ref: '#/components/schemas/FurnitureSnapshot' }
+        alreadyExists:     { type: boolean }
+
+    AddWishlistResponse:
+      allOf:
+        - $ref: '#/components/schemas/WishlistItem'
+
+    WishlistListResponse:
+      type: object
+      required: [items, totalActive, totalPurchased, truncated]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/WishlistItem' }
+        totalActive:    { type: integer, minimum: 0 }
+        totalPurchased: { type: integer, minimum: 0 }
+        truncated:      { type: boolean, default: false }
+
+    # -------------------- Shared error envelope --------------------
+    # Identical shape to UC-01-photo-upload / UC-01-space-analysis /
+    # UC-01-recommendation — NO new envelope introduced.
+    SpringErrorResponse:
+      type: object
+      required: [errorCode, message, correlationId]
+      properties:
+        errorCode:
+          $ref: '#/components/schemas/WishlistErrorCode'
+        message:
+          type: string
+          description: Korean, user-facing.
+        correlationId:
+          type: string
+          format: uuid
+          description: UUIDv4 linking the client error to backend logs.

@@ -1,0 +1,196 @@
+%% AuthenticSelf - UC-01-photo-upload: Backend class diagram
+%% Source of truth (all under src/backend/src/main/java/com/authenticself):
+%%   controller/PhotoUploadController.java
+%%   controller/UploadExceptionAdvice.java
+%%   controller/dto/UploadPhotoResponse.java
+%%   controller/dto/ErrorResponse.java
+%%   service/PhotoUploadService.java
+%%   service/UploadErrorCode.java
+%%   service/UploadException.java
+%%   storage/ObjectStorageService.java
+%%   storage/PutResult.java
+%%   storage/local/LocalFileSystemObjectStorageService.java
+%%   domain/Space.java
+%%   repository/SpaceRepository.java
+%%   repository/UserRepository.java
+%%   config/UploadProperties.java
+%%   config/StorageProperties.java
+%% PRD refs: PRD section 7 (class diagram), PRD section 9 (layering).
+
+classDiagram
+    direction LR
+
+    class PhotoUploadController {
+        <<Controller>>
+        -PhotoUploadService service
+        +ResponseEntity~UploadPhotoResponse~ uploadPhoto(X-User-Id, file)
+    }
+
+    class UploadExceptionAdvice {
+        <<RestControllerAdvice>>
+        +handleUpload(UploadException) ErrorResponse
+        +handleTooLarge(MaxUploadSizeExceededException) ErrorResponse
+        +handleMissingHeader(MissingRequestHeaderException) ErrorResponse
+        +handleUncaught(Exception) ErrorResponse
+    }
+
+    class UploadPhotoResponse {
+        <<DTO record>>
+        +String roomId
+        +String uploadUrl
+        +String status
+    }
+
+    class ErrorResponse {
+        <<DTO record>>
+        +String errorCode
+        +String message
+        +String correlationId
+    }
+
+    class PhotoUploadService {
+        <<Service>>
+        -ObjectStorageService storage
+        -SpaceRepository spaces
+        -UserRepository users
+        -UploadProperties props
+        +UploadPhotoResponse upload(userId, contentType, filename, bytes)
+        -String extensionFor(contentType)
+    }
+
+    class UploadErrorCode {
+        <<enumeration>>
+        EMPTY_FILE : 400
+        MISSING_USER_HEADER : 401
+        UNKNOWN_USER : 401
+        UNSUPPORTED_MEDIA_TYPE : 415
+        FILE_TOO_LARGE : 413
+        IMAGE_UNREADABLE : 422
+        RESOLUTION_TOO_LOW : 422
+        STORAGE_PERSIST_FAILED : 500
+        +HttpStatus httpStatus()
+        +String defaultMessage()
+    }
+
+    class UploadException {
+        <<RuntimeException>>
+        -UploadErrorCode code
+        +UploadErrorCode code()
+    }
+
+    class ObjectStorageService {
+        <<Interface>>
+        +PutResult upload(objectKey, bytes, contentType)
+        +void delete(objectKey)
+        +boolean exists(objectKey)
+    }
+
+    class PutResult {
+        <<record>>
+        +String objectKey
+        +String url
+        +long sizeBytes
+    }
+
+    class LocalFileSystemObjectStorageService {
+        <<Service>>
+        -Path root
+        +PutResult upload(objectKey, bytes, contentType)
+        +void delete(objectKey)
+        +boolean exists(objectKey)
+        -Path resolveSafely(objectKey)
+    }
+
+    class SpaceRepository {
+        <<Repository>>
+        JpaRepository~Space, String~
+    }
+
+    class UserRepository {
+        <<Repository>>
+        JpaRepository~User, String~
+    }
+
+    class Space {
+        <<Entity>>
+        @Table spaces
+        +String roomId [PK]
+        +String userId [FK]
+        +String photoUrl [V2]
+        +String originalFilename [V2]
+        +String contentType [V2]
+        +Long fileSizeBytes [V2]
+        +Status status [V2 ENUM]
+        +LocalDateTime uploadedAt [V2]
+        +String dimensions [V1 relaxed NULL]
+        +String mainColor [V1 relaxed NULL]
+        +String style [V1 relaxed NULL]
+        +LocalDateTime analysisDate [V1 relaxed NULL]
+    }
+
+    class SpaceStatus {
+        <<enumeration>>
+        PENDING_ANALYSIS
+        ANALYZED
+        FAILED
+    }
+
+    class UploadProperties {
+        <<ConfigProperties>>
+        app.upload.max-size-bytes
+        app.upload.min-width
+        app.upload.min-height
+        app.upload.allowed-content-types
+    }
+
+    class StorageProperties {
+        <<ConfigProperties>>
+        app.storage.local.root
+    }
+
+    %% --- wiring -----------------------------------------------------
+    PhotoUploadController --> PhotoUploadService : delegates
+    PhotoUploadController ..> UploadPhotoResponse : returns
+    PhotoUploadController ..> UploadException : throws
+    UploadExceptionAdvice ..> UploadException : handles
+    UploadExceptionAdvice ..> UploadErrorCode : reads
+    UploadExceptionAdvice ..> ErrorResponse : returns
+    PhotoUploadService --> ObjectStorageService : uses
+    PhotoUploadService --> SpaceRepository : uses
+    PhotoUploadService --> UserRepository : uses
+    PhotoUploadService --> UploadProperties : reads
+    PhotoUploadService ..> UploadException : throws
+    PhotoUploadService ..> PutResult : consumes
+    PhotoUploadService ..> Space : builds
+    UploadException --> UploadErrorCode : carries
+    LocalFileSystemObjectStorageService ..|> ObjectStorageService : implements
+    LocalFileSystemObjectStorageService --> StorageProperties : reads
+    ObjectStorageService ..> PutResult : returns
+    SpaceRepository --> Space : manages
+    Space --> SpaceStatus : has
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% PhotoUploadController ..................... FR-1, AC-6, AC-7, AC-8
+%% UploadExceptionAdvice ..................... FR-6, AC-7, AC-8, AC-10, AC-11
+%% UploadPhotoResponse (DTO) ................. FR-1, AC-6
+%% ErrorResponse (DTO) ....................... FR-6, AC-20
+%% PhotoUploadService ........................ FR-2, FR-4, FR-5, FR-9,
+%%                                            AC-6, AC-9, AC-10, AC-12, AC-13, AC-14
+%% UploadErrorCode (enum) .................... FR-6
+%% UploadException ........................... FR-6
+%% ObjectStorageService (Interface) .......... FR-3, AC-15
+%% PutResult (record) ........................ FR-3
+%% LocalFileSystemObjectStorageService ....... FR-3, AC-16 (key layout)
+%% SpaceRepository ........................... FR-4 (persistence)
+%% UserRepository ............................ FR-4 (AC-9 existence)
+%% Space (Entity, V2-extended) ............... FR-0, FR-4, AC-3, AC-4
+%% SpaceStatus (enum) ........................ FR-0 (PENDING_ANALYSIS|ANALYZED|FAILED)
+%% UploadProperties .......................... FR-8, AC-21
+%% StorageProperties ......................... FR-8, AC-21
+%%
+%% Cloud-SDK isolation (AC-15):
+%%   only LocalFileSystemObjectStorageService (in com.authenticself.storage.local)
+%%   imports platform-specific APIs; controller / service / repository bind
+%%   solely to the ObjectStorageService interface.

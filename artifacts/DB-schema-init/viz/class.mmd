@@ -1,0 +1,83 @@
+%% AuthenticSelf — DB-schema-init: JPA entity stubs class diagram
+%% Source of truth: src/backend/src/main/java/com/authenticself/domain/{User,Space,Furniture,Wishlist}.java
+%% PRD refs: §7 class diagram (authoritative attribute types + cardinalities)
+%% Scope:    FR-8 stub-only — @Entity + @Table + @Id + @Column. No @ManyToOne,
+%%           no repositories, no services, no business methods.
+
+classDiagram
+    class User {
+        <<Entity>>
+        @Table(name="users")
+        +String userId  %% @Id @Column(user_id, len=64)
+        +String name    %% @Column(name, len=100, NN)
+        +String email   %% @Column(email, len=255, unique)
+        +LocalDateTime createdAt  %% @Column(created_at, insertable=false)
+        +LocalDateTime updatedAt  %% @Column(updated_at, insertable=false)
+    }
+
+    class Space {
+        <<Entity>>
+        @Table(name="spaces")
+        +String roomId            %% @Id @Column(room_id, len=64)
+        +String userId            %% @Column(user_id, len=64)   — FK in SQL, no @ManyToOne per FR-8
+        +String dimensions        %% @Column(dimensions, len=100)
+        +String mainColor         %% @Column(main_color, len=32)
+        +String style             %% @Column(style, len=64)
+        +LocalDateTime analysisDate %% @Column(analysis_date)
+    }
+
+    class Furniture {
+        <<Entity>>
+        @Table(name="furniture")
+        +String furnitureId       %% @Id @Column(furniture_id, len=64)
+        +String type              %% @Column(type, len=32)
+        +String style             %% @Column(style, len=64)
+        +String size              %% @Column(size, len=100)
+    }
+
+    class Wishlist {
+        <<Entity>>
+        @Table(name="wishlist")
+        +String wishlistId        %% @Id @Column(wishlist_id, len=64)
+        +String userId            %% @Column(user_id, len=64) — FK in SQL
+        +String furnitureId       %% @Column(furniture_id, len=64) — FK in SQL
+        +String category          %% @Column(category, len=32)
+        +Integer price            %% @Column(price) INT NOT NULL
+        +Status status            %% @Enumerated(STRING) @Column(columnDefinition ENUM)
+        +LocalDateTime createdAt
+        +LocalDateTime updatedAt
+    }
+
+    class Status {
+        <<enumeration>>
+        Active
+        Purchased
+    }
+
+    Wishlist *-- Status : native ENUM (FR-4, AC-10)
+
+    %% Cardinalities declared conceptually (NOT wired yet — FR-8 stub-only).
+    %% Later UC tasks will introduce @ManyToOne / @OneToMany on these relations.
+    User "1" ..> "0..*" Space     : analyzes (PRD §7)
+    User "1" ..> "0..*" Wishlist  : owns (PRD §7)
+    Furniture "1" ..> "0..*" Wishlist : contains (PRD §7)
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% All four classes satisfy FR-8:
+%%   - PascalCase class names, camelCase fields, snake_case @Column(name=...)
+%%   - @Entity + @Table(name="users" | "spaces" | "furniture" | "wishlist")
+%%   - Primary-key fields annotated @Id
+%%   - NO business methods (uploadPhoto / selectStyle / addToWishlist /
+%%     purchaseItem / analyzeSpace / updateStatus / getDetails) — out of scope
+%%     for this task, belong to later UC tasks (spec §8).
+%%
+%% AC-17 evidence:
+%%   - Exactly four files present under com.authenticself.domain/
+%%   - Each carries @Entity + @Table pointing to the correct snake_case table
+%%   - Compiles under `./gradlew compileJava`
+%%
+%% Dashed cardinality arrows are conceptual only — the actual FK wiring
+%% lives in V1__init_schema.sql (see er.mmd). No JPA relationship annotations
+%% are present at this task's scope.

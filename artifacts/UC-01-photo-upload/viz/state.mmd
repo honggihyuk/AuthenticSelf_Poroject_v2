@@ -1,0 +1,59 @@
+%% AuthenticSelf - UC-01-photo-upload: spaces.status lifecycle
+%% Source of truth:
+%%   src/backend/src/main/resources/db/migration/V2__add_spaces_status_and_photo.sql
+%%   src/backend/src/main/java/com/authenticself/domain/Space.java (Status enum)
+%%   src/backend/src/main/java/com/authenticself/service/PhotoUploadService.java
+%% PRD refs: PRD section 6 UC-01 (two lifecycle phases: upload -> analysis),
+%%           PRD section 6 UC-01 alt-flow 1-a (analysis failure).
+%%
+%% Scope: only the [*] -> PENDING_ANALYSIS transition is implemented in this task.
+%%        The two outgoing transitions are marked "future" and will be implemented
+%%        by UC-01-space-analysis (Task 3).
+
+stateDiagram-v2
+    [*] --> PENDING_ANALYSIS : POST /api/v1/spaces/photo (201)<br/>PhotoUploadService.upload()<br/>FR-4 / AC-6 (IMPLEMENTED)
+
+    PENDING_ANALYSIS --> ANALYZED : AI space analysis success<br/>sets dimensions / mainColor / style / analysisDate<br/>FUTURE (UC-01-space-analysis, Task 3)
+    PENDING_ANALYSIS --> FAILED   : AI space analysis error<br/>maps UC-01 alt-flow 1-a at analysis time<br/>FUTURE (UC-01-space-analysis, Task 3)
+
+    ANALYZED --> [*] : terminal for this state machine<br/>(row may later be referenced by wishlist/recommendation)
+    FAILED   --> [*] : terminal (user must re-upload;<br/>RN surfaces "재업로드 요청" message)
+
+    note right of PENDING_ANALYSIS
+        Only transition implemented by
+        UC-01-photo-upload (this task).
+        Row is in this state as soon as
+        the blob is stored AND the
+        spaces INSERT commits.
+    end note
+
+    note right of ANALYZED
+        Future state (Task 3).
+        Shown here so downstream
+        consumers (recommendation,
+        admin dashboard) know the
+        full lifecycle.
+    end note
+
+    note right of FAILED
+        Future state (Task 3).
+        Triggered by AI-side failure
+        (low quality, unreadable
+        room structure) - upload-time
+        low-quality is caught earlier
+        by RESOLUTION_TOO_LOW (FR-2).
+    end note
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% [*] -> PENDING_ANALYSIS ................. FR-0 DEFAULT, FR-4, AC-3, AC-6
+%%                                           IMPLEMENTED by this task
+%% PENDING_ANALYSIS -> ANALYZED ............ FUTURE (Task 3) - UC-01-space-analysis
+%% PENDING_ANALYSIS -> FAILED .............. FUTURE (Task 3) - alt-flow 1-a at analysis
+%%
+%% Note on early-rejection path (FR-2):
+%%   The upload-time validation errors (RESOLUTION_TOO_LOW, IMAGE_UNREADABLE,
+%%   UNSUPPORTED_MEDIA_TYPE, FILE_TOO_LARGE, EMPTY_FILE) never create a spaces
+%%   row at all - they are rejected before the [*] -> PENDING_ANALYSIS
+%%   transition, so they do not appear as states here. See sequence.mmd alt branch.

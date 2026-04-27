@@ -1,0 +1,9 @@
+# -----------------------------------------------------------------
+# Overrides used by @ActiveProfiles("test") integration tests (AC-22).
+# Explicitly disables the scheduled AI poller so tests that drive the
+# orchestrator directly are not raced by the background sweep.
+# -----------------------------------------------------------------
+app:
+  ai:
+    poller:
+      enabled: false

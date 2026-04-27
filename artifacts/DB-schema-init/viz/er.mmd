@@ -1,0 +1,67 @@
+%% AuthenticSelf — DB-schema-init: Entity-Relationship diagram
+%% Source of truth: src/backend/src/main/resources/db/migration/V1__init_schema.sql
+%% PRD refs: §3 (DB design), §7 (class diagram cardinalities), §6 UC-02 (status enum)
+
+erDiagram
+    users ||--o{ spaces   : "analyzes (FR-2)"
+    users ||--o{ wishlist : "owns (FR-4)"
+    furniture ||--o{ wishlist : "contains (FR-4)"
+
+    users {
+        VARCHAR_64  user_id     PK "FR-1"
+        VARCHAR_100 name           "FR-1 NOT NULL"
+        VARCHAR_255 email       UK "FR-1 UNIQUE"
+        TIMESTAMP   created_at     "FR-1 DEFAULT CURRENT_TIMESTAMP"
+        TIMESTAMP   updated_at     "FR-1 ON UPDATE CURRENT_TIMESTAMP"
+    }
+
+    spaces {
+        VARCHAR_64  room_id       PK "FR-2"
+        VARCHAR_64  user_id       FK "FR-2 fk_spaces_user CASCADE"
+        VARCHAR_100 dimensions       "FR-2 AI-estimated size"
+        VARCHAR_32  main_color       "FR-2 dominant color"
+        VARCHAR_64  style            "FR-2 analyzed style"
+        DATETIME    analysis_date    "FR-2 AI run timestamp"
+    }
+
+    furniture {
+        VARCHAR_64  furniture_id  PK "FR-3"
+        VARCHAR_32  type             "FR-3 idx_furniture_type_style"
+        VARCHAR_64  style            "FR-3 idx_furniture_type_style"
+        VARCHAR_100 size             "FR-3 physical dimensions"
+    }
+
+    wishlist {
+        VARCHAR_64  wishlist_id  PK "FR-4"
+        VARCHAR_64  user_id      FK "FR-4 fk_wishlist_user CASCADE"
+        VARCHAR_64  furniture_id FK "FR-4 fk_wishlist_furniture RESTRICT"
+        VARCHAR_32  category        "FR-4 NOT NULL"
+        INT         price           "FR-4 NOT NULL"
+        ENUM        status          "FR-4 ENUM Active Purchased DEFAULT Active"
+        TIMESTAMP   created_at      "FR-4"
+        TIMESTAMP   updated_at      "FR-4 ON UPDATE"
+    }
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% Relations (PRD §7 cardinalities):
+%%   users (1) --o{ spaces   (0..*)  : User analyzes Space        [FR-2, AC-7]
+%%   users (1) --o{ wishlist (0..*)  : User owns Wishlist         [FR-4, AC-8]
+%%   furniture (1) --o{ wishlist (0..*) : Wishlist contains Furniture [FR-4, AC-9]
+%%
+%% Constraints shown:
+%%   PK  — Primary key  (AC-6)         one per business table
+%%   UK  — Unique       (FR-1)         users.email
+%%   FK  — Foreign key  (FR-2, FR-4)   fk_spaces_user / fk_wishlist_user / fk_wishlist_furniture
+%%   ENUM — native MySQL ENUM (FR-4, AC-10, AC-11) status = Active | Purchased
+%%
+%% Indexes (not drawable but tracked here):
+%%   idx_spaces_user_id           on spaces(user_id)         [FR-2, AC-12]
+%%   idx_wishlist_user_id         on wishlist(user_id)       [FR-4, AC-13]
+%%   idx_furniture_type_style     on furniture(type, style)  [FR-3]
+%%
+%% Storage engine + charset:
+%%   ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci  [FR-7, AC-16]
+%% Naming:
+%%   all identifiers snake_case                                         [FR-6, AC-15]

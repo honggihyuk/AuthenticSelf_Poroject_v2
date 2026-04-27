@@ -1,0 +1,482 @@
+[
+  {
+    "id": "AC-1",
+    "fr_ref": "FR-1",
+    "layer": "db",
+    "description": "V7 migration file V7__add_users_role.sql exists under src/backend/src/main/resources/db/migration/ and contains ALTER TABLE users ADD COLUMN role ENUM('USER','ADMIN') NOT NULL DEFAULT 'USER' (AFTER email), and CREATE INDEX idx_users_role ON users(role). The file's header comment documents the admin-bootstrap SQL (UPDATE users SET role='ADMIN' WHERE email=?).",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/main/resources/db/migration/V7__add_users_role.sql"
+  },
+  {
+    "id": "AC-2",
+    "fr_ref": "FR-1",
+    "layer": "db",
+    "description": "After all migrations run on MySQL 8 Testcontainers, INFORMATION_SCHEMA.COLUMNS shows users.role with DATA_TYPE='enum', COLUMN_TYPE matching ENUM('USER','ADMIN'), IS_NULLABLE='NO', and COLUMN_DEFAULT='USER'. INFORMATION_SCHEMA.STATISTICS shows an index named idx_users_role on column role.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/migration/V7UsersRoleMigrationTest.java#columnAndIndexShape_ac2"
+  },
+  {
+    "id": "AC-3",
+    "fr_ref": "FR-1",
+    "layer": "db",
+    "description": "Inserting a users row with role='SUPERVISOR' (or any value not in ENUM('USER','ADMIN')) is rejected by MySQL with data truncation / invalid ENUM value error. Inserting role='USER' and role='ADMIN' both succeed.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/migration/V7UsersRoleMigrationTest.java#enumRejectsUnknownValue_ac3"
+  },
+  {
+    "id": "AC-4",
+    "fr_ref": "FR-1",
+    "layer": "db",
+    "description": "Inserting a users row without specifying role defaults to 'USER'.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/migration/V7UsersRoleMigrationTest.java#defaultIsUser_ac4"
+  },
+  {
+    "id": "AC-5",
+    "fr_ref": "FR-1,FR-13",
+    "layer": "db",
+    "description": "V1..V6 migration files are byte-for-byte unmodified: git diff / file-hash snapshot shows no change to V1__init_schema.sql, V2__add_spaces_status_and_photo.sql, V3__add_preferred_style.sql, V4__extend_furniture_catalog.sql, V5__seed_furniture_catalog.sql, V6__extend_wishlist_timestamps.sql.",
+    "verify_by": "static",
+    "target_file_or_test": "git diff against main across the six prior migration files"
+  },
+  {
+    "id": "AC-6",
+    "fr_ref": "FR-2",
+    "layer": "backend",
+    "description": "com.authenticself.domain.User has a nested enum Role { USER, ADMIN } and a field annotated with @Enumerated(EnumType.STRING) @Column(name=\"role\", nullable=false, length=16, columnDefinition=\"ENUM('USER','ADMIN')\") with a getRole() / setRole(Role) accessor pair. The pre-existing fields (userId, name, email, createdAt, updatedAt) retain identical JPA annotations.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/domain/User.java"
+  },
+  {
+    "id": "AC-7",
+    "fr_ref": "FR-3",
+    "layer": "backend",
+    "description": "com.authenticself.admin.AdminAuthorizer exposes a public method requireAdmin(String userIdHeader) that (a) throws AdminException(MISSING_USER_HEADER) when the argument is null/blank, (b) throws AdminException(USER_NOT_FOUND) when the user row is absent, (c) throws AdminException(NOT_ADMIN) when user.role != ADMIN, (d) returns normally when role == ADMIN. Unit-tested with a mocked UserRepository.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminAuthorizerTest.java#fourBranches_ac7"
+  },
+  {
+    "id": "AC-8",
+    "fr_ref": "FR-3,FR-4,FR-5,FR-6,FR-7,FR-8",
+    "layer": "backend",
+    "description": "Every admin controller handler (/overview, /users, /rooms, /wishlist, /sales) calls AdminAuthorizer.requireAdmin(userIdHeader) as its first statement, verified by (a) a source-level test reading AdminController bytecode or (b) an integration test confirming that requireAdmin is invoked exactly once per request (Mockito spy on AdminAuthorizer).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerAuthTest.java#authorizerCalledFirst_ac8"
+  },
+  {
+    "id": "AC-9",
+    "fr_ref": "FR-4",
+    "layer": "backend",
+    "description": "Given an ADMIN user u_admin and a seeded DB, when GET /api/v1/admin/overview?window=ALL with X-User-Id=u_admin is called, then response is HTTP 200 with JSON body containing top-level keys exactly {window, generatedAt, users, rooms, wishlist, sales} (no extras, no missing). generatedAt is a valid ISO-8601 string with +09:00 offset.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#overviewShape_ac9"
+  },
+  {
+    "id": "AC-10",
+    "fr_ref": "FR-4",
+    "layer": "backend",
+    "description": "GET /api/v1/admin/overview with no window parameter returns HTTP 200 with response.window='ALL' (default).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#overviewDefaultWindowIsAll_ac10"
+  },
+  {
+    "id": "AC-11",
+    "fr_ref": "FR-4,FR-11",
+    "layer": "backend",
+    "description": "GET /api/v1/admin/overview?window=YESTERDAY (or any value outside {LAST_7D, LAST_30D, ALL}) returns HTTP 400 with errorCode='INVALID_TIME_WINDOW'. Case-insensitive match: window=last_30d, Last_30D, LAST_30D all accepted.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#invalidAndCaseInsensitiveWindow_ac11"
+  },
+  {
+    "id": "AC-12",
+    "fr_ref": "FR-5",
+    "layer": "backend",
+    "description": "GET /api/v1/admin/users?window=ALL returns HTTP 200 with body containing keys {window, generatedAt, totalUsers, totalAdmins, newSignups, activeUsers, signupsByDay}. totalUsers equals COUNT(*) from users WHERE role='USER'. totalAdmins equals COUNT(*) from users WHERE role='ADMIN'. Verified against a seeded DB with 5 USER + 2 ADMIN rows.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#usersTileShapeAndCounts_ac12"
+  },
+  {
+    "id": "AC-13",
+    "fr_ref": "FR-5",
+    "layer": "backend",
+    "description": "For a seeded DB with 10 users where 3 were created in the last 7 days, GET /api/v1/admin/users?window=LAST_7D returns newSignups=3 (regardless of totalUsers, which counts unfiltered when window=ALL and within-window otherwise per FR-5 — design-specialist to clarify test fixture, but newSignups value is the time-windowed count).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#newSignupsWindowed_ac13"
+  },
+  {
+    "id": "AC-14",
+    "fr_ref": "FR-5",
+    "layer": "backend",
+    "description": "activeUsers equals COUNT(DISTINCT spaces.user_id) where spaces.uploaded_at within window. Given a seeded DB with users u1..u5 and spaces such that u1/u2/u3 uploaded within last 7 days and u4/u5 uploaded 10 days ago, GET /admin/users?window=LAST_7D returns activeUsers=3.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#activeUsersDefinition_ac14"
+  },
+  {
+    "id": "AC-15",
+    "fr_ref": "FR-5",
+    "layer": "backend",
+    "description": "signupsByDay is an ascending-ordered array of {date, count} objects with one entry per calendar day in the window (dense — zero-count days included). For window=LAST_7D, length == 8 (7 days + today). For window=ALL with empty users, length == 0.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#signupsByDayDense_ac15"
+  },
+  {
+    "id": "AC-16",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "GET /api/v1/admin/rooms?window=ALL returns HTTP 200 with keys {window, generatedAt, totalSpaces, statusDistribution, styleDistribution, mainColorTop5}. statusDistribution keys are exactly the values of the Space.Status Java enum (verified by reading Space.Status.values() at test time — NOT a hard-coded string set). Every enum value is present, zero-count buckets included.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#roomsStatusDistributionKeys_ac16"
+  },
+  {
+    "id": "AC-17",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "styleDistribution keys are exactly the 5-value Style enum {MODERN,SIMPLE,CLASSIC,SCANDINAVIAN,INDUSTRIAL}, all present with integer values >= 0. Sum of styleDistribution values <= totalSpaces (inequality permitted because ANALYZED rows with NULL style are counted in totalSpaces but not in any style bucket — documented as expected).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#roomsStyleDistributionKeys_ac17"
+  },
+  {
+    "id": "AC-18",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "Sum of statusDistribution values equals totalSpaces exactly (invariant). Verified via a seeded DB with known counts per status.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#roomsStatusSumInvariant_ac18"
+  },
+  {
+    "id": "AC-19",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "mainColorTop5 is an array of at most 5 {color, count} objects, ordered DESC by count, ties broken by color ASC. NULL main_color rows excluded. For a seeded DB with 7 distinct main_color values, the array length is 5. For a seeded DB with 3 distinct values, the array length is 3 (no padding). app.admin.top-colors-limit override (AC-49) changes the cap accordingly.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#mainColorTop5Ordering_ac19"
+  },
+  {
+    "id": "AC-20",
+    "fr_ref": "FR-7",
+    "layer": "backend",
+    "description": "GET /api/v1/admin/wishlist?window=ALL returns HTTP 200 with keys {window, generatedAt, totalItems, statusDistribution, categoryDistribution, conversionRate}. statusDistribution keys are exactly {ACTIVE, PURCHASED}; sum equals totalItems. categoryDistribution keys are exactly {desk, bed, chair, lighting}, all present with value >= 0; sum equals totalItems.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#wishlistTileShapeAndInvariants_ac20"
+  },
+  {
+    "id": "AC-21",
+    "fr_ref": "FR-7",
+    "layer": "backend",
+    "description": "conversionRate = statusDistribution.PURCHASED / totalItems (rounded to 2 dp), and 0.0 <= conversionRate <= 1.0. When totalItems = 0, conversionRate = 0.0 (no divide-by-zero). Verified by two fixtures: (a) 100 items with 25 purchased -> 0.25; (b) 0 items -> 0.0.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#conversionRateNoDivideByZero_ac21"
+  },
+  {
+    "id": "AC-22",
+    "fr_ref": "FR-8",
+    "layer": "backend",
+    "description": "GET /api/v1/admin/sales?window=ALL returns HTTP 200 with keys {window, generatedAt, totalSalesKrw, purchasedItemCount, averageOrderKrw, salesByCategory, salesByDay}. totalSalesKrw = SUM(wishlist.price) over rows with status='Purchased' (DB casing) AND purchased_at within window (or no-window filter for ALL). Sum of salesByCategory values equals totalSalesKrw. averageOrderKrw = round(totalSalesKrw / purchasedItemCount); when purchasedItemCount=0, averageOrderKrw = 0 and totalSalesKrw = 0.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#salesTileShapeAndInvariants_ac22"
+  },
+  {
+    "id": "AC-23",
+    "fr_ref": "FR-8",
+    "layer": "backend",
+    "description": "Sales total uses wishlist.price (snapshot at add-time), NOT furniture.price. Verified by seeding a wishlist row with price=100000 then UPDATEing furniture.price=999999 for that furniture_id — the sales total still reports the 100000 snapshot.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#salesUsesSnapshotPrice_ac23"
+  },
+  {
+    "id": "AC-24",
+    "fr_ref": "FR-8",
+    "layer": "backend",
+    "description": "Wishlist rows with status='Active' (purchased_at IS NULL) do not contribute to sales aggregates. Seeded DB with 3 Active + 2 Purchased rows returns purchasedItemCount=2 and totalSalesKrw = SUM of the 2 purchased rows' prices.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#salesExcludesActiveRows_ac24"
+  },
+  {
+    "id": "AC-25",
+    "fr_ref": "FR-8",
+    "layer": "backend",
+    "description": "salesByCategory keys are exactly {desk, bed, chair, lighting}, all present with value >= 0. salesByDay is a dense ascending array; window=LAST_30D produces length 31. For window=ALL with zero purchases, salesByDay is an empty array.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#salesByCategoryAndByDay_ac25"
+  },
+  {
+    "id": "AC-26",
+    "fr_ref": "FR-3,FR-11",
+    "layer": "backend",
+    "description": "A non-admin (role=USER) caller hitting GET /api/v1/admin/overview with a valid X-User-Id header receives HTTP 403 with errorCode='NOT_ADMIN'. Same response for /admin/users, /admin/rooms, /admin/wishlist, /admin/sales (one parameterized test per endpoint).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerAuthTest.java#nonAdminGets403OnEveryEndpoint_ac26"
+  },
+  {
+    "id": "AC-27",
+    "fr_ref": "FR-3,FR-11",
+    "layer": "backend",
+    "description": "Every admin endpoint with a missing X-User-Id header returns HTTP 400 with errorCode='MISSING_USER_HEADER' (shared code). Every admin endpoint with an X-User-Id that does not exist in users returns HTTP 404 with errorCode='USER_NOT_FOUND'.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerAuthTest.java#missingHeaderAndUnknownUser_ac27"
+  },
+  {
+    "id": "AC-28",
+    "fr_ref": "FR-11",
+    "layer": "backend",
+    "description": "AdminErrorCode enum contains exactly the values {MISSING_USER_HEADER, INVALID_TIME_WINDOW, USER_NOT_FOUND, NOT_ADMIN}. Every enum value has a non-null defaultMessage (Korean) and an httpStatus matching the FR-11 mapping (400, 400, 404, 403 respectively).",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/admin/AdminErrorCode.java"
+  },
+  {
+    "id": "AC-29",
+    "fr_ref": "FR-11",
+    "layer": "backend",
+    "description": "AdminExceptionAdvice is annotated @RestControllerAdvice(basePackages = \"com.authenticself.admin\") AND @Order(Ordered.HIGHEST_PRECEDENCE) AND emits ErrorResponse(errorCode.name(), message, correlationId) — identical pattern to WishlistExceptionAdvice.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/admin/AdminExceptionAdvice.java"
+  },
+  {
+    "id": "AC-30",
+    "fr_ref": "FR-9",
+    "layer": "backend",
+    "description": "com.authenticself.admin.AdminOverviewRepository exists as a @Repository with the 14 methods enumerated in FR-9 (countUsersInRoleAndWindow, countNewSignups, countActiveUsers, groupSignupsByDay, countSpaces, countSpacesByStatus, countSpacesByStyle, topMainColors, countWishlist, countWishlistByRestStatus, countWishlistByCategory, sumSalesKrw, countPurchasedItems, sumSalesByCategory, sumSalesByDay — exact spellings permitted to vary by one underscore as long as semantics match; 1:1 unit test coverage required).",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/admin/AdminOverviewRepository.java"
+  },
+  {
+    "id": "AC-31",
+    "fr_ref": "FR-9",
+    "layer": "backend",
+    "description": "Every AdminOverviewRepository method with an Instant windowStart parameter correctly omits the date predicate when windowStart is null (verified by comparing the result against an unfiltered equivalent). For non-null windowStart, only rows with the relevant column >= windowStart are included.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminOverviewRepositoryTest.java#nullWindowOmitsPredicate_ac31"
+  },
+  {
+    "id": "AC-32",
+    "fr_ref": "FR-10",
+    "layer": "backend",
+    "description": "AdminOverviewService uses an injectable java.time.Clock. A test supplies a fixed Clock (2026-04-18T00:00:00+09:00) and asserts that LAST_7D windowStart = 2026-04-11T00:00:00+09:00 and LAST_30D windowStart = 2026-03-19T00:00:00+09:00.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminOverviewServiceTest.java#fixedClockWindowMath_ac32"
+  },
+  {
+    "id": "AC-33",
+    "fr_ref": "FR-4,FR-10",
+    "layer": "backend",
+    "description": "For a given seeded DB and a fixed window, the per-tile payload inside GET /admin/overview?window=<w> is byte-identical (ignoring only the generatedAt millisecond field) to the standalone GET /admin/{tile}?window=<w> response body. Verified across 3 window values x 4 tiles = 12 pairs.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#overviewMatchesPerTileEndpoints_ac33"
+  },
+  {
+    "id": "AC-34",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "If Space.Status Java enum gains or loses a value in a future iteration, AC-16 still passes because the test reads Space.Status.values() at runtime and asserts the response statusDistribution keys equal that set. The test does NOT depend on a hard-coded string list.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#roomsStatusKeysMatchJavaEnum_ac34"
+  },
+  {
+    "id": "AC-35",
+    "fr_ref": "FR-6",
+    "layer": "backend",
+    "description": "An ANALYZED row with NULL style (partial-success from UC-01-space-analysis) is counted in totalSpaces and in statusDistribution['ANALYZED'] but not in any styleDistribution bucket. Test seeds such a row and asserts sum(styleDistribution) == totalSpaces - 1.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#nullStyleNotBucketed_ac35"
+  },
+  {
+    "id": "AC-36",
+    "fr_ref": "FR-12",
+    "layer": "contract",
+    "description": "artifacts/UC-03-admin-overview/api_contract.yaml exists, parses as OpenAPI 3.0.x, and defines paths /api/v1/admin/overview (GET), /api/v1/admin/users (GET), /api/v1/admin/rooms (GET), /api/v1/admin/wishlist (GET), /api/v1/admin/sales (GET). Each path documents the window query parameter as an enum with values [LAST_7D, LAST_30D, ALL].",
+    "verify_by": "static",
+    "target_file_or_test": "artifacts/UC-03-admin-overview/api_contract.yaml"
+  },
+  {
+    "id": "AC-37",
+    "fr_ref": "FR-12",
+    "layer": "contract",
+    "description": "api_contract.yaml defines schemas OverviewResponse, UsersTile, RoomsTile, WishlistTile, SalesTile, TimeWindow, and re-references the shared SpringErrorResponse schema {errorCode, message, correlationId}. Every non-2xx response references the shared envelope.",
+    "verify_by": "static",
+    "target_file_or_test": "artifacts/UC-03-admin-overview/api_contract.yaml"
+  },
+  {
+    "id": "AC-38",
+    "fr_ref": "FR-12",
+    "layer": "contract",
+    "description": "api_contract.yaml enumerates every new error code (INVALID_TIME_WINDOW, NOT_ADMIN) in the error-envelope errorCode enum OR in a dedicated AdminErrorCode schema, alongside the reused codes MISSING_USER_HEADER and USER_NOT_FOUND.",
+    "verify_by": "static",
+    "target_file_or_test": "artifacts/UC-03-admin-overview/api_contract.yaml"
+  },
+  {
+    "id": "AC-39",
+    "fr_ref": "NFR latency",
+    "layer": "backend",
+    "description": "With a seeded dataset of 1000 users, 5000 spaces, 10000 wishlist rows, GET /api/v1/admin/overview?window=ALL P95 latency <= 500 ms across 20 sequential calls on the Testcontainers MySQL configuration. Per-tile endpoints individually P95 <= 200 ms.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminOverviewIntegrationTest.java#p95Latency_ac39"
+  },
+  {
+    "id": "AC-40",
+    "fr_ref": "NFR idempotency",
+    "layer": "backend",
+    "description": "Two consecutive GET /api/v1/admin/overview?window=ALL calls (no DB mutation between) return byte-identical responses except for the generatedAt millisecond-resolution timestamp. Every aggregate value (counts, distributions, sums) is equal.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#repeatedGetIdempotent_ac40"
+  },
+  {
+    "id": "AC-41",
+    "fr_ref": "NFR security",
+    "layer": "backend",
+    "description": "No log line emitted by AdminController, AdminOverviewService, or AdminAuthorizer contains substrings equal to any seeded users.email or users.name value. Verified by capturing SLF4J logs during a full endpoint sweep and grepping for seeded PII strings (zero matches).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminLoggingPiiTest.java#noEmailOrNameInLogs_ac41"
+  },
+  {
+    "id": "AC-42",
+    "fr_ref": "FR-14",
+    "layer": "backend",
+    "description": "application.yml contains keys app.admin.time-zone (default 'Asia/Seoul', String) and app.admin.top-colors-limit (default 5, int). Overriding app.admin.top-colors-limit=3 via Spring property causes GET /admin/rooms to return at most 3 mainColorTop5 entries.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminConfigOverrideTest.java#topColorsLimitOverride_ac42"
+  },
+  {
+    "id": "AC-43",
+    "fr_ref": "FR-15",
+    "layer": "mobile",
+    "description": "No files under src/mobile/ are created or modified by this task. Verified by git diff: src/mobile/ shows zero changes. src/mobile/App.tsx RootStackParamList does NOT gain an 'Admin' or 'AdminOverview' entry. No src/admin/ directory exists (admin web SPA deferred).",
+    "verify_by": "static",
+    "target_file_or_test": "git diff src/mobile src/admin"
+  },
+  {
+    "id": "AC-44",
+    "fr_ref": "FR-13",
+    "layer": "backend",
+    "description": "A non-admin caller (role=USER) hitting each pre-existing UC-01 / UC-02 endpoint (POST /spaces/photo, GET /spaces/{roomId}, PUT /spaces/{roomId}/preferred-style, GET /spaces/{roomId}/recommendations, POST /wishlist, GET /wishlist, PATCH /wishlist/{id}, DELETE /wishlist/{id}) receives the same HTTP status and same response body shape as before V7 was introduced. Verified by running the full pre-existing UC-01 / UC-02 test suite with a user seeded as role=USER and comparing snapshots.",
+    "verify_by": "test",
+    "target_file_or_test": "src/backend/ (gradle test) — UC-01 / UC-02 tests regression re-run"
+  },
+  {
+    "id": "AC-45",
+    "fr_ref": "FR-13",
+    "layer": "backend",
+    "description": "No pre-existing controller, service, DTO, exception, or advice class (PhotoUploadController, SpaceController, SpaceExceptionAdvice, AIOrchestrator, RecommendationOrchestrator, AIOrchestratorExceptionAdvice, WishlistController, WishlistService, WishlistExceptionAdvice) is modified by this task (git diff shows no changes). The shared ErrorResponse record is also unmodified.",
+    "verify_by": "static",
+    "target_file_or_test": "git diff across the listed files"
+  },
+  {
+    "id": "AC-46",
+    "fr_ref": "FR-12",
+    "layer": "contract",
+    "description": "api_contract.yaml parses without errors under an OpenAPI 3.0.x validator (e.g. swagger-parser or openapi-cli). No unresolved $ref, no schema with type:object missing properties, no path with a 200 response lacking a schema.",
+    "verify_by": "static",
+    "target_file_or_test": "artifacts/UC-03-admin-overview/api_contract.yaml (validated via openapi-cli or equivalent)"
+  },
+  {
+    "id": "AC-47",
+    "fr_ref": "NFR error-envelope",
+    "layer": "backend",
+    "description": "Every non-2xx response emitted by the five admin endpoints conforms to the shared ErrorResponse record: errorCode is String UPPER_SNAKE, message is a non-null Korean string, correlationId is a UUIDv4-formatted String. Verified by JSON-path assertions in AdminControllerTest against all documented error cases.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#errorEnvelopeShape_ac47"
+  },
+  {
+    "id": "AC-48",
+    "fr_ref": "FR-13",
+    "layer": "backend",
+    "description": "The wishlist table SELECT behaviour (UC-02-wishlist FR-6 list endpoint, FR-7 patch, FR-8 delete) is functionally unchanged after V7: the existing WishlistControllerTest, WishlistServiceConcurrencyTest, WishlistStateMachineInvariantTest suites remain green with zero test modifications. The V7 migration does not introduce any FK or trigger touching the wishlist table.",
+    "verify_by": "test",
+    "target_file_or_test": "src/backend/ (gradle test) — UC-02-wishlist test suite re-run"
+  },
+  {
+    "id": "AC-49",
+    "fr_ref": "FR-14,FR-6",
+    "layer": "backend",
+    "description": "Overriding app.admin.top-colors-limit to 3 via Spring property (or ADMIN_TOP_COLORS_LIMIT env var) causes GET /admin/rooms mainColorTop5 array length <= 3. Overriding to 10 permits length up to 10 (bounded by distinct value count). Default of 5 is applied when the key is absent.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminConfigOverrideTest.java#topColorsLimitOverride_ac49"
+  },
+  {
+    "id": "AC-50",
+    "fr_ref": "NFR determinism",
+    "layer": "backend",
+    "description": "For a fixed seeded DB and a fixed Clock, two successive GET /admin/{tile}?window=<w> calls produce byte-identical JSON output (after stripping generatedAt). mainColorTop5 tie-breaking on color ASC is deterministic: seeded DB with color='#AAAAAA' count=5, color='#BBBBBB' count=5 always returns #AAAAAA first.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminOverviewIntegrationTest.java#determinism_ac50"
+  },
+  {
+    "id": "AC-51",
+    "fr_ref": "FR-10",
+    "layer": "backend",
+    "description": "AdminOverviewService emits exactly one INFO log line per request matching the pattern /op=(overview|users|rooms|wishlist|sales) window=(LAST_7D|LAST_30D|ALL) userId=\\S+ durationMs=\\d+/. Error paths log WARN with errorCode= correlationId=. No log line contains an email or user name substring (reinforces AC-41).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminOverviewServiceTest.java#logsShape_ac51"
+  },
+  {
+    "id": "AC-52",
+    "fr_ref": "D-2,FR-15",
+    "layer": "admin-web",
+    "description": "No files under src/admin/ are created by this task (admin web SPA is explicitly deferred per D-2 Option C). git status / git diff shows no src/admin/ directory exists.",
+    "verify_by": "static",
+    "target_file_or_test": "git status / filesystem probe for src/admin/"
+  },
+  {
+    "id": "AC-53",
+    "fr_ref": "FR-4,FR-5,FR-6,FR-7,FR-8",
+    "layer": "backend",
+    "description": "Every admin endpoint response body has top-level fields {window, generatedAt} preceding the tile-specific payload. window reflects the input (uppercased to canonical LAST_7D / LAST_30D / ALL). generatedAt is ISO-8601 with +09:00 offset (Asia/Seoul zone per FR-14).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminControllerTest.java#commonEnvelopeFields_ac53"
+  },
+  {
+    "id": "AC-54",
+    "fr_ref": "FR-16",
+    "layer": "backend",
+    "description": "Iteration-1 dead-code removal: grep -n \"new Random\" src/backend/src/test/java/com/authenticself/admin/AdminOverviewIntegrationTest.java returns zero matches. The Random rng = new Random(42); declaration at line ~108 has been removed entirely. Additionally, the file must NOT add import java.util.Random; — grep -n \"import java.util.Random\" returns zero matches as well.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminOverviewIntegrationTest.java"
+  },
+  {
+    "id": "AC-55",
+    "fr_ref": "FR-16",
+    "layer": "backend",
+    "description": "The file AdminOverviewIntegrationTest.java compiles: ./gradlew :backend:compileTestJava exits with code 0. If Gradle is not available in the verification environment, a static check is sufficient — no unresolved Random symbol exists anywhere in the file (grep for the identifier Random returns zero matches outside comments), and no other symbol declared in the file goes unused / unresolved. This AC subsumes iteration-1's AC-23/AC-35/AC-39/AC-50 compile cascade fix.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminOverviewIntegrationTest.java"
+  },
+  {
+    "id": "AC-56",
+    "fr_ref": "FR-17",
+    "layer": "backend",
+    "description": "AdminOverviewIntegrationTest#seed() persists data visible to every @Test method in the same class. Evidence (grep-verifiable): the seed() method declaration is NOT preceded by an @Transactional annotation on its own line nor on the same line as the @BeforeAll annotation. If a class-level @Transactional is present on AdminOverviewIntegrationTest, a @Commit annotation MUST be present at class level or on seed() — but the mandated resolution per FR-17 is simply to remove @Transactional from seed(), not to add @Commit. The annotation state of other test classes in com.authenticself.admin must remain unchanged.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/admin/AdminOverviewIntegrationTest.java"
+  },
+  {
+    "id": "AC-57",
+    "fr_ref": "FR-18",
+    "layer": "backend",
+    "description": "AdminOverviewService.CATEGORY_KEYS is declared as a List<String> with deterministic iteration order. Specifically: grep -n \"CATEGORY_KEYS\" src/backend/src/main/java/com/authenticself/admin/AdminOverviewService.java shows a declaration of the form private static final List<String> CATEGORY_KEYS = List.of(\"desk\", \"bed\", \"chair\", \"lighting\"); and does NOT show Set.of( on the same line. The four string literals appear in exactly the order desk, bed, chair, lighting.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/admin/AdminOverviewService.java"
+  },
+  {
+    "id": "AC-58",
+    "fr_ref": "FR-19",
+    "layer": "backend",
+    "description": "AdminOverviewService#asLocalDate contains exactly one branch that tests instanceof on a Date-family type. Evidence: grep -c \"instanceof .* Date \" src/backend/src/main/java/com/authenticself/admin/AdminOverviewService.java returns 1, not 2. The dead second branch if (v instanceof Date d) return d.toLocalDate(); at iteration-1 line ~350 has been deleted.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/admin/AdminOverviewService.java"
+  },
+  {
+    "id": "AC-59",
+    "fr_ref": "FR-20",
+    "layer": "contract",
+    "description": "acceptance_criteria.json is self-consistent: for every AC whose target_file_or_test references a test method in the format <file>#<method>, the referenced class file exists on disk AND contains a method with that exact name. In particular: AC-39 points to AdminOverviewIntegrationTest.java#p95Latency_ac39, which exists; AC-50 points to AdminOverviewIntegrationTest.java#determinism_ac50, which exists. The prior iteration-1 stale paths (AdminOverviewLatencyTest.java, AdminDeterminismTest) are no longer referenced anywhere in this JSON file.",
+    "verify_by": "static",
+    "target_file_or_test": "artifacts/UC-03-admin-overview/acceptance_criteria.json"
+  },
+  {
+    "id": "AC-60",
+    "fr_ref": "iteration-2 scope guard",
+    "layer": "backend",
+    "description": "None of the 10 preserved iteration-1 design choices are re-scoped by iteration 2. Evidence (conjunctive): (a) AdminOverviewRepository still declares extends JpaRepository<User, String> (marker-entity pattern preserved); (b) the integration-test seed counts remain at approximately 10% of NFR scale (100 users, 500 spaces, 1000 wishlist rows), NOT the full 1000/5000/10000; (c) Space.Status enum in com.authenticself.domain still declares exactly three values (PENDING_ANALYSIS, ANALYZED, FAILED); (d) AdminOverviewRepository's query methods still return List<Object[]> (raw projections), and AdminOverviewService still pivots via asString / asLong / asLocalDate helpers; (e) MISSING_USER_HEADER enum constant remains duplicated across AdminErrorCode, SpaceErrorCode, WishlistErrorCode (wire values byte-identical); (f) UsersTileResponse remains a flat record (not a @JsonUnwrapped composite). Any refactor that changes one of these items is an out-of-scope violation for iteration 2 and must be rejected by verification.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/admin/ + src/backend/src/test/java/com/authenticself/admin/ (multi-file static scan)"
+  }
+]

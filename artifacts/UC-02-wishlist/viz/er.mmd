@@ -1,0 +1,84 @@
+%% AuthenticSelf - UC-02-wishlist: ER slice for the post-V6 wishlist table
+%% Anchors: FR-1 / FR-2 / AC-1..AC-6 / PRD section 7 entity diagram.
+%%
+%% V6 additions (FR-1 / AC-2 / AC-3):
+%%   + DATETIME added_at      NOT NULL DEFAULT CURRENT_TIMESTAMP
+%%   + DATETIME purchased_at  NULL
+%%   + UNIQUE   uq_wishlist_user_furniture (user_id, furniture_id)
+%%
+%% Column mutability legend (AC-5 / Wishlist.java):
+%%   [RO]  insertable=false updatable=false - DB-managed, JPA never writes
+%%   [RW]  service writes it (via setter)
+%%   [PK]  primary key
+%%   [FK]  foreign key
+%%   [UK]  part of a unique index
+%%
+%% Sources of truth:
+%%   src/backend/src/main/resources/db/migration/V6__extend_wishlist_timestamps.sql
+%%   src/backend/src/main/java/com/authenticself/domain/Wishlist.java
+%%   src/backend/src/main/java/com/authenticself/domain/User.java       (Task-1 V1)
+%%   src/backend/src/main/java/com/authenticself/domain/Furniture.java  (Task-5 V4/V5)
+
+erDiagram
+
+    USERS ||--o{ WISHLIST : "owns (user_id FK)"
+    FURNITURE ||--o{ WISHLIST : "referenced by (furniture_id FK)"
+
+    USERS {
+        string  user_id          PK "VARCHAR(64) - Task-1 V1"
+        string  email                "UNIQUE - Task-1 V1"
+        string  nickname
+        datetime created_at
+        datetime updated_at
+    }
+
+    FURNITURE {
+        string  furniture_id     PK "VARCHAR(64) - Task-1 V1"
+        string  name
+        string  type                 "ENUM(desk,bed,chair,lighting) - UC-01 V4/V5"
+        string  style_tags           "CSV - UC-01 V4"
+        string  color_hex
+        int     price
+        string  image_url
+        string  dimensions
+        datetime created_at
+        datetime updated_at
+    }
+
+    WISHLIST {
+        string  wishlist_id      PK "VARCHAR(64), app-generated UUID"
+        string  user_id          FK "VARCHAR(64) - RW on INSERT only"
+        string  furniture_id     FK "VARCHAR(64) - RW on INSERT only"
+        string  category            "ENUM(desk,bed,chair,lighting) - RW on INSERT only"
+        int     price               "RW on INSERT only - snapshot at add time"
+        string  status              "ENUM(Active,Purchased) - RW (set by PATCH)"
+        datetime added_at           "RO - V6, DB default CURRENT_TIMESTAMP, never mutated"
+        datetime purchased_at       "RW - V6, NULL when Active, now() when Purchased"
+        datetime created_at         "RO - V1, DB default"
+        datetime updated_at         "RO - V1, DB ON UPDATE CURRENT_TIMESTAMP"
+    }
+
+    %% Constraints (Mermaid does not have native syntax, recorded here):
+    %% --------------------------------------------------------------------
+    %% PRIMARY KEY:
+    %%   wishlist.wishlist_id
+    %% FOREIGN KEYS:
+    %%   wishlist.user_id       REFERENCES users(user_id)       ON DELETE CASCADE (V1)
+    %%   wishlist.furniture_id  REFERENCES furniture(furniture_id) ON DELETE CASCADE (V1)
+    %% UNIQUE:
+    %%   uq_wishlist_user_furniture (user_id, furniture_id)     -- V6 (FR-1 / AC-3)
+    %%   - the concurrency primitive behind idempotent POST (FR-4 / AC-15).
+    %%     Concurrent inserts of the same pair resolve to a single row;
+    %%     the losing INSERT surfaces as DataIntegrityViolationException
+    %%     which WishlistService.add catches and translates to
+    %%     HTTP 200 { alreadyExists: true }.
+    %% INVARIANT (AC-52):
+    %%   status='Active'     <=>  purchased_at IS NULL
+    %%   status='Purchased'  <=>  purchased_at IS NOT NULL
+    %%   Enforced in WishlistService.patch (set/clear purchasedAt in
+    %%   lock-step with the status transition) - no DB-level CHECK.
+
+    %% Cardinalities from PRD section 7:
+    %%   User      1  ---  0..*  Wishlist
+    %%   Wishlist  0..* ---  1    Furniture
+    %% Both satisfied by the ||--o{ / ||--o{ edges above.

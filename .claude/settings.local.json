@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"C:/AuthenticSelf_Project/AuthenticSelf_v3/.claude/agents\")",
+      "Bash(mkdir -p \"C:/AuthenticSelf_Project/AuthenticSelf_v3/artifacts\")",
+      "Bash(python -m pytest -q)",
+      "Bash(python *)",
+      "Bash(pip install *)",
+      "Read(//c/AuthenticSelf_Project/AuthenticSelf_v3/**)",
+      "Bash(npm test *)",
+      "Bash(npx tsc *)",
+      "Bash(xxd)",
+      "Bash(npm install *)",
+      "Bash(exit 0)",
+      "Bash(npx jest *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8001/health)",
+      "Bash(curl -s http://127.0.0.1:8001/health)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" -X POST http://127.0.0.1:8001/analyze/style -H \"Content-Type: application/json\" -d '{}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8001/recommend/furniture -H \"Content-Type: application/json\" -d '{\"roomId\":\"r1\",\"resolvedStyle\":\"MODERN\",\"roomDimensions\":{\"widthCm\":400,\"lengthCm\":300,\"heightCm\":250},\"mainColor\":\"#FAFAFA\",\"detectedObjects\":[]}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(echo \"exit=$?\")",
+      "Bash(docker --version)",
+      "Bash(docker info *)",
+      "Bash(java -version)",
+      "Bash(gradle -v)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Program Files/Microsoft/**)",
+      "PowerShell(Get-Command *)",
+      "Bash(reg query *)",
+      "Bash(wsl -- java -version)",
+      "Bash(wsl -- bash -c \"cd /mnt/c/AuthenticSelf_Project/AuthenticSelf_v3/src/backend && ls -la\")",
+      "Bash(wsl *)",
+      "Bash(MSYS2_ARG_CONV_EXCL=\"*\" wsl -- bash /mnt/c/AuthenticSelf_Project/AuthenticSelf_v3/var/run_gradle.sh)",
+      "Bash(MSYS2_ARG_CONV_EXCL=\"*\" wsl *)",
+      "Bash(grep --line-buffered -E \"BUILD \\(SUCCESSFUL|FAILED\\)|FAILED$|> Task :compileJava FAILED|Tests run|tests completed|\\\\\\\\[Incubating\\\\\\\\]|exit=|Error:|Exception in|Toolchain|No tests found|What went wrong\")",
+      "Bash(grep --line-buffered -E \"BUILD \\(SUCCESSFUL|FAILED\\)|> Task :[a-zA-Z]+\\(Java|Test|\\)\\(\\\\s|$\\)|error:|FAILURE|What went wrong|^[0-9]+ \\(tests?|actionable task\\) \")"
+    ]
+  }
+}

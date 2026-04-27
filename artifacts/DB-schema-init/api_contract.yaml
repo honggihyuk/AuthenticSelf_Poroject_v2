@@ -1,0 +1,21 @@
+# =============================================================================
+# API Contract — DB-schema-init
+# =============================================================================
+# N/A — this task is DB schema only; no REST endpoints are introduced.
+#
+# This file is intentionally a placeholder so that downstream tooling (the
+# Visualization Agent, the Verification Agent, and the prompt pipeline) can
+# rely on a stable per-task artifact path. Subsequent UC tasks (UC-01 photo
+# upload, UC-02 wishlist, UC-03 admin dashboard) will populate real OpenAPI
+# 3.0 contracts at this same path within their own task folders.
+# =============================================================================
+openapi: 3.0.3
+info:
+  title: AuthenticSelf — DB-schema-init (no API surface)
+  version: "0.0.0"
+  description: |
+    N/A — this task is DB schema only; no REST endpoints introduced.
+    See artifacts/DB-schema-init/spec.md and design.md for the schema
+    contract that downstream API tasks will build against.
+paths: {}
+components: {}

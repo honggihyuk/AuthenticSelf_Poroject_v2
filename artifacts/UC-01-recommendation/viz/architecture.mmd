@@ -1,0 +1,229 @@
+%% AuthenticSelf - UC-01-recommendation: component / architecture diagram
+%% UPDATED from artifacts/UC-01-style-selection/viz/architecture.mmd
+%%
+%% This is the "cross-process wiring + edge contracts" view. It is deliberately
+%% narrower than the sibling task's full-platform diagram: we focus on the
+%% recommendation slice (RN -> Spring -> Python -> MySQL), annotating each wire
+%% with the DTO / route / table it touches. The broader platform graph is in
+%% the sibling viz dirs (Task 1 / 2 / 3 / 4).
+%%
+%% Changes landed in THIS task (Task 5):
+%%   Client Layer:
+%%     - RecommendationScreen NOW ACTIVE (green4)
+%%     - api/spaces.ts (FR-25)  getRecommendations + analytics stub
+%%   Backend:
+%%     - SpaceController gains GET /api/v1/spaces/{roomId}/recommendations (FR-19)
+%%     - NEW com.authenticself.ai.RecommendationOrchestrator (FR-13 / FR-18)
+%%     - NEW com.authenticself.ai.RecommendationClient (FR-13 / AC-27)
+%%     - NEW DTOs RecommendationRequest / Response / Item / ScoreBreakdown
+%%     - NEW controller DTO RecommendationsApiResponse (wraps Python response +
+%%       adds preferredStyle + cacheHit)
+%%     - Furniture entity extended with 8 new columns (FR-17 / AC-42)
+%%     - V4 extend + V5 seed migrations
+%%     - SpaceErrorCode + AIErrorCode gain CATALOG_EMPTY / RECOMMENDATION_FAILED
+%%       / PREFERRED_STYLE_NOT_SET / INVALID_TOP_N
+%%   AI Service Layer:
+%%     - NEW FastAPI route POST /recommend/furniture (FR-1 / FR-2 / AC-1)
+%%     - NEW analyzer module app/analyzers/recommender.py (rank, score_item, ...)
+%%     - NEW schema module app/schemas_reco.py (Pydantic v2 models)
+%%     - NEW error classes CatalogEmptyError / RecommendationFailedError in errors.py
+%%   Data Layer:
+%%     - `furniture` schema gains 8 columns (V4); V5 seeds 28 rows.
+%%     - flyway_schema_history gains V4 + V5 rows.
+%%
+%% Source of truth:
+%%   src/mobile/src/screens/RecommendationScreen.tsx
+%%   src/mobile/src/api/spaces.ts
+%%   src/mobile/App.tsx   (route name "Recommendation")
+%%   src/backend/src/main/java/com/authenticself/space/SpaceController.java
+%%   src/backend/src/main/java/com/authenticself/ai/RecommendationOrchestrator.java
+%%   src/backend/src/main/java/com/authenticself/ai/RecommendationClient.java
+%%   src/backend/src/main/java/com/authenticself/ai/dto/*.java
+%%   src/backend/src/main/java/com/authenticself/controller/dto/RecommendationsApiResponse.java
+%%   src/backend/src/main/java/com/authenticself/domain/Furniture.java
+%%   src/backend/src/main/resources/db/migration/V4__extend_furniture_catalog.sql
+%%   src/backend/src/main/resources/db/migration/V5__seed_furniture_catalog.sql
+%%   src/ai/app/routes/recommend.py
+%%   src/ai/app/analyzers/recommender.py
+%%   src/ai/app/schemas_reco.py
+%%   src/ai/app/errors.py
+%%   src/ai/app/main.py  (include_router(recommend_router))
+
+flowchart LR
+
+    %% =========================================================
+    %% Client Layer
+    %% =========================================================
+    subgraph Client["Client Layer  (React Native + Expo)"]
+        direction TB
+        RN_Style["StyleSelectionScreen<br/>Task 4 - replace('Recommendation', {roomId})"]:::active
+        RN_Rec["RecommendationScreen<br/>FR-23 / AC-44..AC-50 - NEW ACTIVE<br/>useEffect(fetchOnce) on mount<br/>spinner / normal / no-fit / error states"]:::active5
+        RN_Api["api/spaces.ts<br/>getRecommendations(opts)<br/>emitWishlistAddClicked (stub)<br/>assertRecommendationResponse<br/>FR-25 / AC-44 / AC-48"]:::active5
+        RN_Types["types/style.ts<br/>Task 4 PREFERRED_STYLE_LABELS reused<br/>(모던 / 심플 / ...)"]:::active
+    end
+
+    %% =========================================================
+    %% Backend Layer
+    %% =========================================================
+    subgraph Backend["Backend Layer  (Spring Boot 3 / Java 17)"]
+        direction TB
+
+        subgraph SpPkg["com.authenticself.space.*  (Task 4 + Task 5)"]
+            direction TB
+            CTRL_SP["SpaceController @CrossOrigin<br/>GET /api/v1/spaces/{roomId}/recommendations<br/>FR-19 / AC-28..AC-37 - NEW route<br/>guards: X-User-Id, topN in [1,10]"]:::active5
+            ERR_SP["SpaceErrorCode<br/>+ PREFERRED_STYLE_NOT_SET 409<br/>+ INVALID_TOP_N 400"]:::active5
+            ADV_SP["SpaceExceptionAdvice<br/>envelope {errorCode,message,correlationId}"]:::active
+        end
+
+        subgraph AIpkg["com.authenticself.ai.*  (Task 3 + Task 4 + Task 5)"]
+            direction TB
+            ORCH["RecommendationOrchestrator @Service<br/>FR-13 / FR-18 / AC-28 - NEW<br/>recommend(roomId, userId, topN) -> OrchestratorResult<br/>invalidate(roomId) (FR-20 / AC-30)"]:::active5
+            CACHE_R["ConcurrentHashMap~CacheKey,CachedEntry~<br/>key=(roomId, preferredStyle)<br/>TTL 600s / cap 1024<br/>FR-14 / AC-29"]:::active5
+            CLIENT_R["RecommendationClient @Component<br/>callRecommend(RecommendationRequest) -> RecommendationResponse<br/>RestClient, connect=2s / read=15s<br/>FR-13 / AC-27"]:::active5
+            EXEC["aiExecutor<br/>ThreadPoolTaskExecutor (Task 4)<br/>core=2 / max=8 / q=64 - REUSED"]:::active
+            ERR_AI["AIErrorCode<br/>+ CATALOG_EMPTY 422<br/>+ RECOMMENDATION_FAILED 422<br/>fromPythonCode(...)"]:::active5
+            DTOS_R["dto/*<br/>RecommendationRequest (nested Space+Dimensions+CatalogItem)<br/>RecommendationResponse (nested Recommendations+Item)<br/>ScoreBreakdown<br/>AiErrorResponse (reused)"]:::active5
+        end
+
+        subgraph CtrlDTOs["com.authenticself.controller.dto  (Task 5)"]
+            direction TB
+            API_RESP["RecommendationsApiResponse<br/>wraps RecommendationResponse<br/>+ preferredStyle (String)<br/>+ cacheHit (boolean)<br/>@JsonInclude(ALWAYS) on warning<br/>FR-19 / AC-28"]:::active5
+        end
+
+        subgraph Persist["persistence / repos"]
+            direction TB
+            REPO_S["SpaceRepository<br/>Task 3 findById"]:::active
+            REPO_F["FurnitureRepository<br/>JpaRepository~Furniture,String~<br/>findAll()<br/>FR-17 / AC-42"]:::active5
+            ENT_F["Furniture entity<br/>+ name / price / imageUrl / colorHex<br/>+ widthCm / lengthCm / heightCm / styleTags<br/>+ getStyleTagsList() helper<br/>AC-42"]:::active5
+        end
+
+        FW["Flyway<br/>V1 + V2 + V3 + V4 + V5"]:::active5
+    end
+
+    %% =========================================================
+    %% AI Service Layer
+    %% =========================================================
+    subgraph AI["AI Service Layer  (Python 3.11 + FastAPI :8001)"]
+        direction TB
+
+        subgraph ONE_FASTAPI["single FastAPI process  src/ai/app/**"]
+            direction TB
+            PY_APP["app/main.py<br/>GET /health<br/>POST /analyze/space (Task 3)<br/>POST /analyze/style (Task 4)<br/>POST /recommend/furniture - NEW (AC-1)<br/>include_router(recommend_router)"]:::active5
+
+            subgraph RecoSVC["스타일 & 추천 서버 - 추천 엔진 (Task 5 NOW ACTIVE)"]
+                direction TB
+                PY_RECO_ROUTE["routes/recommend.py<br/>async def recommend_furniture<br/>inline for catalog<=500<br/>else asyncio.to_thread(rank, ...)<br/>FR-1 / FR-11 / AC-22"]:::active5
+                PY_RECO_ANA["analyzers/recommender.py<br/>resolve_style / score_size_fit<br/>score_style_match / score_color_harmony<br/>score_object_conflict / compose_rationale<br/>rank(catalog, ..., top_n)<br/>W_SIZE=0.35 / W_STYLE=0.30<br/>W_COLOR=0.20 / W_CONFLICT=0.15<br/>FR-5..FR-10 / AC-15"]:::active5
+                PY_SCHEMAS["schemas_reco.py<br/>RecommendRequest / RecommendResponse<br/>CatalogItem / SpaceBlock<br/>RecommendationItemModel / ScoreBreakdownModel<br/>Literal enums (extra='forbid')<br/>FR-2 / AC-2 / AC-4"]:::active5
+                PY_ERRS["errors.py<br/>+ CatalogEmptyError<br/>+ RecommendationFailedError<br/>AnalyzerError base (reused)"]:::active5
+            end
+
+            subgraph SpaceSVC["공간 분석 (Task 3 active)"]
+                PY_SPACE["routes/space.py + analyzers/color.py<br/>unchanged by this task"]:::active
+            end
+            subgraph StyleSVC["스타일 분석 (Task 4 active)"]
+                PY_STYLE["routes/style.py + analyzers/style.py<br/>unchanged by this task"]:::active
+            end
+
+            PY_DEPS["runtime deps UNCHANGED<br/>fastapi / uvicorn / pydantic / numpy<br/>opencv-python-headless / pillow<br/>stdlib colorsys (NEW usage, no new dep)<br/>NO torch / tensorflow / ultralytics (AC-23)"]:::active5
+        end
+    end
+
+    %% =========================================================
+    %% Data Layer
+    %% =========================================================
+    subgraph Data["Data Layer (MySQL 8)"]
+        direction TB
+        MY[("MySQL 8<br/>schema=authenticself")]:::active
+        T_S[("spaces<br/>READ-only from this task")]:::active
+        T_F[("furniture<br/>V4 adds 8 columns<br/>V5 seeds 28 rows (7 per category)<br/>AC-24 / AC-25 / AC-26")]:::active5
+        HIST[("flyway_schema_history<br/>+ V4 row + V5 row")]:::active5
+    end
+
+    %% =========================================================
+    %% Wire edges (DTO / route / table on each edge)
+    %% =========================================================
+
+    %% RN -> Spring
+    RN_Style -. "navigation.replace('Recommendation', { roomId })" .-> RN_Rec
+    RN_Rec ==>|"getRecommendations({baseUrl,userId,roomId,topN:3})"| RN_Api
+    RN_Rec ==>|"PREFERRED_STYLE_LABELS[resp.preferredStyle]<br/>+ ' 스타일 추천'"| RN_Types
+    RN_Api ==>|"GET /api/v1/spaces/{roomId}/recommendations?topNPerCategory=3<br/>header X-User-Id<br/>body: none"| CTRL_SP
+
+    %% Spring internals
+    CTRL_SP ==>|"recommend(roomId,userId,topN)"| ORCH
+    CTRL_SP ..>|"RecommendationsApiResponse.from(...)"| API_RESP
+    CTRL_SP ..>|"throw SpaceException"| ERR_SP
+    ERR_SP --> ADV_SP
+    ORCH -->|"findById(roomId)"| REPO_S
+    ORCH -->|"findAll()"| REPO_F
+    REPO_F --> ENT_F
+    ORCH <-->|"get / put / invalidate<br/>CacheKey(roomId, preferredStyle)"| CACHE_R
+    ORCH -->|"CompletableFuture.supplyAsync(<br/>() -> client.callRecommend(req),<br/>aiExecutor)"| EXEC
+    EXEC -->|"RecommendationRequest"| CLIENT_R
+    CLIENT_R ..>|"throws AIException"| ERR_AI
+    CLIENT_R ..>|"marshals via Jackson"| DTOS_R
+
+    %% Spring -> Python (cross-process)
+    CLIENT_R ==>|"POST /recommend/furniture<br/>{roomId,userId,space{detectedObjects:[]},<br/>preferredStyle,catalog[28],topNPerCategory}"| PY_APP
+    PY_APP --> PY_RECO_ROUTE
+    PY_RECO_ROUTE -->|"rank(catalog, resolved_style, room, detected, topN)"| PY_RECO_ANA
+    PY_RECO_ROUTE ..>|"raise CatalogEmptyError / RecommendationFailedError"| PY_ERRS
+    PY_RECO_ROUTE ..>|"validates via Pydantic"| PY_SCHEMAS
+
+    %% Response back
+    PY_APP ==>|"200 {roomId,status,resolvedStyle,<br/>generatedAt,recommendations{4},warning,processingMs}<br/>OR 422 {errorCode,message,roomId}"| CLIENT_R
+    CLIENT_R ==>|"RecommendationResponse (Jackson-deserialized)"| ORCH
+    ORCH ==>|"OrchestratorResult(response,preferredStyle,cacheHit)"| CTRL_SP
+    CTRL_SP ==>|"200 RecommendationsApiResponse<br/>OR 4xx/5xx {errorCode,message,correlationId}"| RN_Api
+    RN_Api ==>|"RecommendationResponse (shape-asserted)"| RN_Rec
+
+    %% Data layer
+    FW --> MY
+    MY --- T_S
+    MY --- T_F
+    MY --- HIST
+    REPO_S --> MY
+    REPO_F --> MY
+
+    %% Pending wiring
+    RN_Rec -.->|"(UC-02 Task 6)<br/>POST /api/v1/wishlist"| Backend
+    ENT_F -.->|"(AR Task 8)<br/>consumes widthCm/lengthCm/heightCm + imageUrl"| Client
+
+    classDef active   fill:#d4edda,stroke:#28a745,color:#155724,stroke-width:2px;
+    classDef active5  fill:#cfe2ff,stroke:#0d6efd,color:#052c65,stroke-width:2px;
+    classDef pending  fill:#f1f1f1,stroke:#999,color:#777,stroke-dasharray:4 3;
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% GREEN (active) - preserved from earlier tasks:
+%%   aiExecutor bean (Task 4), SpaceRepository (Task 3), StyleSelectionScreen,
+%%   /analyze/space, /analyze/style, SpaceExceptionAdvice envelope,
+%%   PREFERRED_STYLE_LABELS in RN.
+%%
+%% BLUE (active5) - delivered by Task 5 (UC-01-recommendation):
+%%   Python /recommend/furniture route .......... FR-1 / FR-2 / AC-1
+%%   analyzers/recommender.py ................... FR-5..FR-10 / AC-15
+%%   schemas_reco.py ............................ FR-2
+%%   errors.py CatalogEmpty + RecommendationFailed FR-12
+%%   Spring RecommendationOrchestrator .......... FR-13 / FR-18 / AC-28
+%%   Spring RecommendationClient ................ FR-13 / AC-27
+%%   Spring cache (ConcurrentHashMap) ........... FR-14 / AC-29
+%%   Spring RecommendationRequest/Response DTOs . FR-13
+%%   Spring RecommendationsApiResponse wrapper .. FR-19 / AC-28
+%%   Spring GET /recommendations endpoint ....... FR-19 / AC-28..AC-37
+%%   Spring cache invalidate on PUT ............. FR-20 / AC-30
+%%   SpaceErrorCode PREFERRED_STYLE_NOT_SET etc . FR-12 / FR-19
+%%   AIErrorCode CATALOG_EMPTY / REC_FAILED ..... FR-12
+%%   Furniture entity + 8 new columns ........... FR-17 / AC-42
+%%   V4 extend furniture ........................ FR-15 / AC-24
+%%   V5 seed catalog (28 rows) .................. FR-16 / AC-25 / AC-26
+%%   RN RecommendationScreen .................... FR-23 / AC-44..AC-50
+%%   RN api/spaces.ts + getRecommendations ...... FR-25 / AC-44
+%%   RN wishlist analytics stub ................. FR-23 / AC-48
+%%
+%% GREY (pending) - future tasks:
+%%   Wishlist POST (UC-02 / Task 6)
+%%   AR furniture placement (Task 8)
+%%   Admin dashboard analytics (UC-03 / Task 7)

@@ -1,0 +1,115 @@
+%% AuthenticSelf — DB-schema-init: System architecture (baseline)
+%% Mirrors PRD §9 layering (Client / Backend / Data / AI Service), but at this
+%% task's scope ONLY the Data Layer is active. Frontend and AI layers are
+%% intentionally greyed out (pending, future UC tasks).
+%%
+%% Source of truth for the active portion:
+%%   src/backend/src/main/java/com/authenticself/AuthenticSelfApplication.java
+%%   src/backend/src/main/resources/application.yml
+%%   src/backend/src/main/resources/db/migration/V1__init_schema.sql
+%%   src/backend/src/main/java/com/authenticself/domain/*.java
+
+flowchart LR
+    %% =========================================================
+    %% Client Layer — PENDING (future UC tasks)
+    %% =========================================================
+    subgraph Client["Client Layer — pending (future tasks)"]
+        direction TB
+        FE_Web["React Web Upload UI<br/>(UC-01-photo-upload)"]:::pending
+        FE_Admin["Admin Dashboard<br/>(UC-03-admin-overview)"]:::pending
+        FE_Unity["Unity AR Placement<br/>(AR-furniture-placement)"]:::pending
+    end
+
+    %% =========================================================
+    %% Backend Layer — partial (bootstrap only)
+    %% =========================================================
+    subgraph Backend["Backend Layer — bootstrap only"]
+        direction TB
+        App["AuthenticSelfApplication<br/>@SpringBootApplication"]:::active
+        FW["Flyway migrator<br/>spring.flyway.enabled=true"]:::active
+        JPA["JPA entity stubs<br/>com.authenticself.domain.*<br/>(User/Space/Furniture/Wishlist)"]:::active
+        HB["Hibernate (ddl-auto=validate)"]:::active
+
+        CTRL["REST Controllers<br/>(UC-01/UC-02/UC-03)"]:::pending
+        SVC["Service layer<br/>(analyzeSpace / addToWishlist / ...)"]:::pending
+        REPO["Spring Data JpaRepository<br/>interfaces"]:::pending
+    end
+
+    %% =========================================================
+    %% Data Layer — ACTIVE (this task delivers it)
+    %% =========================================================
+    subgraph Data["Data Layer — ACTIVE (this task)"]
+        direction TB
+        MY[("MySQL 8<br/>schema=authenticself<br/>InnoDB + utf8mb4_unicode_ci")]:::active
+        T_U[("users<br/>FR-1, AC-2")]:::active
+        T_S[("spaces<br/>FR-2, AC-3")]:::active
+        T_F[("furniture<br/>FR-3, AC-4")]:::active
+        T_W[("wishlist<br/>FR-4, AC-5")]:::active
+        HIST[("flyway_schema_history<br/>AC-14")]:::active
+        OBJ["Object storage (images)<br/>PRD §9"]:::pending
+    end
+
+    %% =========================================================
+    %% AI Service Layer — PENDING
+    %% =========================================================
+    subgraph AI["AI Service Layer — pending (future tasks)"]
+        direction TB
+        SA["Space Analyzer<br/>(UC-01-space-analysis)"]:::pending
+        SR["Style Recogniser<br/>(UC-01-style-selection)"]:::pending
+        RE["Recommendation Engine<br/>(UC-01-recommendation)"]:::pending
+    end
+
+    %% --- Active wiring (exists today) ---
+    App --> FW
+    App --> HB
+    HB --> JPA
+    FW -->|applies V1__init_schema.sql| MY
+    FW -->|writes version row| HIST
+    MY --- T_U
+    MY --- T_S
+    MY --- T_F
+    MY --- T_W
+    MY --- HIST
+    HB -->|validate columns| MY
+
+    %% --- Pending wiring (dashed, future tasks) ---
+    FE_Web -.-> CTRL
+    FE_Admin -.-> CTRL
+    FE_Unity -.-> CTRL
+    CTRL -.-> SVC
+    SVC -.-> REPO
+    REPO -.-> JPA
+    SVC -.-> SA
+    SVC -.-> SR
+    SVC -.-> RE
+    SA -.-> MY
+    SR -.-> MY
+    RE -.-> MY
+    FE_Web -.-> OBJ
+
+    classDef active  fill:#d4edda,stroke:#28a745,color:#155724,stroke-width:2px;
+    classDef pending fill:#f1f1f1,stroke:#999,color:#777,stroke-dasharray:4 3;
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% GREEN (active) — delivered by this task (DB-schema-init):
+%%   AuthenticSelfApplication .......... bootstrap, FR-5
+%%   Flyway migrator ................... FR-5, AC-14
+%%   V1__init_schema.sql executed ...... FR-1..FR-7, AC-1..AC-16
+%%   JPA entity stubs .................. FR-8, AC-17
+%%   Hibernate validate ................ design decision D1
+%%   MySQL 8 + 4 business tables + history ... AC-1
+%%
+%% GREY (pending) — enriched by subsequent tasks:
+%%   React Web / Admin / Unity AR ...... UC-01, UC-03, AR-furniture-placement
+%%   REST Controllers + Services ....... UC-01/UC-02/UC-03
+%%   Spring Data repositories .......... UC-01/UC-02/UC-03
+%%   Space Analyzer / Style Recogniser /
+%%   Recommendation Engine ............. UC-01-space-analysis,
+%%                                       UC-01-style-selection,
+%%                                       UC-01-recommendation
+%%   Object storage (images) ........... UC-01-photo-upload
+%%
+%% Later viz tasks MUST update this diagram by flipping pending -> active
+%% nodes as each UC-task is completed. This file is the baseline.

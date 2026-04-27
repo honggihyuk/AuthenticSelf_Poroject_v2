@@ -1,0 +1,82 @@
+%% AuthenticSelf - UC-01-space-analysis: orchestrator decision tree
+%% Flowchart view of AIOrchestrator.analyze(roomId) (FR-12).
+%%
+%% Source of truth:
+%%   src/backend/src/main/java/com/authenticself/ai/AIOrchestrator.java
+%%   src/backend/src/main/java/com/authenticself/ai/SpaceAnalysisPersistence.java
+%%   src/backend/src/main/java/com/authenticself/ai/SpaceAnalysisClient.java
+%%   src/backend/src/main/java/com/authenticself/ai/AIErrorCode.java
+
+flowchart TD
+    START([AIOrchestrator.analyze roomId])
+    LOAD["persistence.loadForAnalysis(roomId)<br/>@Transactional(readOnly, REQUIRES_NEW)<br/>FR-12 step 1"]
+    NOTFOUND{{"roomId row exists?"}}
+    STATUSCHECK{{"status == PENDING_ANALYSIS?<br/>FR-12 step 2"}}
+    SHORTCIRCUIT["return SpaceAnalysisResultDTO.ofSkipped(<br/>  roomId, status.name())<br/>AC-17 / AC-idempotent"]
+    CALL["client.callSpaceAnalysis(roomId, photoUrl)<br/>Spring RestClient POST /analyze/space<br/>OUTSIDE any DB tx (FR-12 step 6)<br/>FR-17 / AC-24 - (String,String)->DTO"]
+    KIND{{"Python response kind?"}}
+
+    OK_FORMAT["format dimensions<br/>&quot;{W}x{L}x{H}m&quot;<br/>AC-16 regex"]
+    OK_PERSIST["persistence.markAnalyzed(<br/>  roomId, dims, mainColor)<br/>@Transactional(REQUIRES_NEW)<br/>FR-12 step 4 / AC-16"]
+    OK_DB[("UPDATE spaces<br/>SET dimensions=?, main_color=?,<br/>    analysis_date=now, status='ANALYZED'<br/>WHERE room_id=?<br/>style column UNTOUCHED - Task 4")]
+    OK_DTO["return SpaceAnalysisResultDTO.ofAnalyzed(<br/>  roomId, dims, mainColor, processingMs)<br/>HTTP 200"]
+
+    ERR_ANALYZER["AIException with analyzer code<br/>(ANALYSIS_IMAGE_NOT_FOUND /<br/> ANALYSIS_IMAGE_READ_FAILED /<br/> ANALYSIS_FAILED)<br/>FR-15"]
+    FAIL_PERSIST["persistence.markFailed(roomId)<br/>@Transactional(REQUIRES_NEW)<br/>FR-12 step 5 / AC-18"]
+    FAIL_DB[("UPDATE spaces<br/>SET status='FAILED',<br/>    analysis_date=now<br/>WHERE room_id=?<br/>dimensions/main_color remain NULL")]
+    FAIL_THROW["rethrow AIException<br/>-> advice 422 envelope"]
+
+    ERR_TRANSPORT["AIException(AI_SERVICE_UNAVAILABLE)<br/>connect/read timeout,<br/>ConnectException, unparseable body<br/>FR-15 / AC-19"]
+    TRANSPORT_NOWRITE["NO DB write - row stays PENDING<br/>poller retries next tick"]
+    TRANSPORT_THROW["rethrow AIException<br/>-> advice 502 envelope"]
+
+    NF_THROW["throw SpaceNotFoundException<br/>-> advice 404 SPACE_NOT_FOUND<br/>AC-20"]
+
+    START --> LOAD
+    LOAD --> NOTFOUND
+    NOTFOUND -- no --> NF_THROW
+    NOTFOUND -- yes --> STATUSCHECK
+    STATUSCHECK -- "no (ANALYZED / FAILED)" --> SHORTCIRCUIT
+    STATUSCHECK -- "yes (PENDING_ANALYSIS)" --> CALL
+    CALL --> KIND
+    KIND -- "200 OK" --> OK_FORMAT
+    OK_FORMAT --> OK_PERSIST
+    OK_PERSIST --> OK_DB
+    OK_DB --> OK_DTO
+
+    KIND -- "422 analyzer error" --> ERR_ANALYZER
+    ERR_ANALYZER --> FAIL_PERSIST
+    FAIL_PERSIST --> FAIL_DB
+    FAIL_DB --> FAIL_THROW
+
+    KIND -- "transport error / 5xx / timeout" --> ERR_TRANSPORT
+    ERR_TRANSPORT --> TRANSPORT_NOWRITE
+    TRANSPORT_NOWRITE --> TRANSPORT_THROW
+
+    classDef ok    fill:#d4edda,stroke:#28a745,color:#155724,stroke-width:2px;
+    classDef warn  fill:#fff3cd,stroke:#d39e00,color:#856404,stroke-width:2px;
+    classDef err   fill:#f8d7da,stroke:#c82333,color:#721c24,stroke-width:2px;
+    classDef skip  fill:#d1ecf1,stroke:#17a2b8,color:#0c5460,stroke-width:2px;
+    classDef db    fill:#e2d9f3,stroke:#6f42c1,color:#3d1b64,stroke-width:2px;
+
+    class OK_FORMAT,OK_PERSIST,OK_DTO ok
+    class OK_DB,FAIL_DB db
+    class SHORTCIRCUIT skip
+    class ERR_ANALYZER,FAIL_PERSIST,FAIL_THROW warn
+    class ERR_TRANSPORT,TRANSPORT_NOWRITE,TRANSPORT_THROW,NF_THROW err
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% Blue "skip"   - short-circuit path ........... FR-12 step 2 / AC-17
+%% Green "ok"    - happy path ................... FR-12 step 4 / AC-16
+%% Yellow "warn" - analyzer-level failure ....... FR-12 step 5 / AC-18 / FR-15
+%% Red "err"     - transport failure / not-found  FR-15 / AC-19 / AC-20
+%% Purple "db"   - DB write boundaries (markAnalyzed / markFailed) . FR-12 step 6
+%%
+%% Branch accounting:
+%%   NOTFOUND=no ............... AC-20 (SpaceNotFound -> 404, Python NOT called)
+%%   STATUSCHECK=no ............ AC-17 (already analyzed / failed -> skipped)
+%%   KIND=200 .................. AC-16 (happy path -> status=ANALYZED)
+%%   KIND=422 .................. AC-18 (analyzer -> status=FAILED)
+%%   KIND=transport ............ AC-19 (row stays PENDING, 502 back to caller)

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <!-- AC-15 — viewport meta w/ viewport-fit=cover for iOS notch handling. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AR 배치</title>
+  <!--
+    AC-12 — pinned model-viewer CDN URL, exact version 3.5.0.
+    The only external URL loaded by this scene. No analytics, no trackers.
+    AC-42 asserts there is no third-party analytics or event-tracking
+    script reference in this file (see spec FR for the enumerated list).
+  -->
+  <script
+    type="module"
+    src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js">
+  </script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #111;
+      color: #fff;
+      font-family: -apple-system, "Noto Sans KR", system-ui, sans-serif;
+      overflow: hidden;
+    }
+    model-viewer {
+      width: 100vw;
+      height: 100vh;
+      background: #111;
+      --poster-color: transparent;
+    }
+    #overlay {
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #overlay > * { pointer-events: auto; }
+
+    /* "취소" — top-left, 44pt minimum tap target per NFR-accessibility. */
+    #btn-cancel {
+      position: absolute;
+      top: max(16px, env(safe-area-inset-top, 0px));
+      left: 16px;
+      min-width: 64px;
+      min-height: 44px;
+      padding: 10px 16px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.4);
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    /* "배치 완료" — bottom-center, 44pt minimum. */
+    #btn-place {
+      position: absolute;
+      bottom: max(24px, env(safe-area-inset-bottom, 0px));
+      left: 50%;
+      transform: translateX(-50%);
+      min-width: 160px;
+      min-height: 48px;
+      padding: 12px 28px;
+      border-radius: 24px;
+      border: none;
+      background: #1f6feb;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      cursor: pointer;
+    }
+    #btn-place:disabled {
+      background: #3a3a3a;
+      color: #aaa;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <!--
+    AC-10 — <model-viewer> element with `ar` attribute and the three
+    ar-modes keywords "webxr scene-viewer quick-look" in that order.
+    touch-action="pan-y" prevents iOS Safari from intercepting vertical
+    swipes as browser chrome gestures.
+  -->
+  <model-viewer
+    id="viewer"
+    ar
+    ar-modes="webxr scene-viewer quick-look"
+    camera-controls
+    touch-action="pan-y"
+    shadow-intensity="1"
+    exposure="1"
+    style="width:100vw;height:100vh;">
+  </model-viewer>
+
+  <div id="overlay">
+    <!-- AC-11 — both Korean overlay button strings verbatim. -->
+    <button id="btn-cancel" type="button" aria-label="취소">취소</button>
+    <button id="btn-place" type="button" aria-label="배치 완료">배치 완료</button>
+  </div>
+
+  <script>
+    // -----------------------------------------------------------------
+    // Bridge helpers — AC-16 greps for `ReactNativeWebView.postMessage`.
+    // -----------------------------------------------------------------
+    var BRIDGE_VERSION = 1;
+
+    function postToRN(msg) {
+      try {
+        var rnWV = window.ReactNativeWebView;
+        if (rnWV && typeof rnWV.postMessage === 'function') {
+          rnWV.postMessage(JSON.stringify(msg));
+        }
+      } catch (e) {
+        // postMessage must never throw back into the caller — swallow.
+      }
+    }
+
+    function postError(code, detail) {
+      var payload = { bridgeVersion: BRIDGE_VERSION, event: 'error', errorCode: code };
+      if (detail) payload.message = String(detail);
+      postToRN(payload);
+    }
+
+    // -----------------------------------------------------------------
+    // Scene wiring
+    // -----------------------------------------------------------------
+    var viewer = document.getElementById('viewer');
+    var btnPlace = document.getElementById('btn-place');
+    var btnCancel = document.getElementById('btn-cancel');
+
+    // Place button is disabled until a model is loaded successfully.
+    btnPlace.disabled = true;
+
+    // Track the last load payload so RN can re-inject without re-mounting.
+    var lastLoad = null;
+
+    // AC-44 — install the inbound hook. RN calls this via injectJavaScript.
+    window.__authenticSelfBridgeLoad = function (payload) {
+      try {
+        var data = typeof payload === 'string' ? JSON.parse(payload) : payload;
+        if (!data || data.bridgeVersion !== BRIDGE_VERSION) {
+          postError('AR_SESSION_ERROR', 'bridgeVersion mismatch');
+          return;
+        }
+        if (data.event === 'unload') {
+          // Release model + disable overlay — RN is tearing us down.
+          viewer.removeAttribute('src');
+          btnPlace.disabled = true;
+          return;
+        }
+        if (data.event !== 'load') {
+          postError('AR_SESSION_ERROR', 'unknown inbound event');
+          return;
+        }
+        lastLoad = data;
+        viewer.setAttribute('src', data.modelUrl);
+        // D-3 capability probe: model-viewer exposes canActivateAR
+        // asynchronously — poll once on the next frame.
+        setTimeout(function () {
+          try {
+            if (viewer.canActivateAR === false) {
+              postError('AR_NOT_SUPPORTED', 'canActivateAR=false');
+            }
+          } catch (e) {
+            postError('AR_NOT_SUPPORTED', String(e && e.message));
+          }
+        }, 0);
+      } catch (e) {
+        postError('AR_SESSION_ERROR', String(e && e.message));
+      }
+    };
+
+    // model-viewer emits `load` when the GLB is parsed + ready.
+    viewer.addEventListener('load', function () {
+      btnPlace.disabled = false;
+    });
+
+    // model-viewer emits `error` when fetching / parsing the GLB fails.
+    viewer.addEventListener('error', function (ev) {
+      var detail = ev && ev.detail && ev.detail.sourceError
+        ? ev.detail.sourceError.message
+        : 'model load failed';
+      postError('AR_MODEL_LOAD_FAILED', detail);
+    });
+
+    // WebXR session-end with abnormal reason or camera deny surfaces as
+    // ar-status="failed" on <model-viewer> 3.x.
+    viewer.addEventListener('ar-status', function (ev) {
+      var status = ev && ev.detail && ev.detail.status;
+      if (status === 'failed') {
+        postError('AR_SESSION_ERROR', 'ar-status=failed');
+      }
+      if (status === 'not-presenting' && viewer.dataset.arStarted === '1') {
+        // Session ended after a successful start — normal path, do nothing.
+        viewer.dataset.arStarted = '';
+      }
+      if (status === 'session-started') {
+        viewer.dataset.arStarted = '1';
+      }
+    });
+
+    // User-denied camera: browser dispatches a DOMException that bubbles
+    // through the window.error handler.
+    window.addEventListener('error', function (ev) {
+      var msg = (ev && ev.message) || '';
+      if (/NotAllowedError|camera|permission/i.test(msg)) {
+        postError('AR_CAMERA_DENIED', msg);
+      }
+    });
+
+    // -----------------------------------------------------------------
+    // Overlay buttons
+    // -----------------------------------------------------------------
+    btnPlace.addEventListener('click', function () {
+      // v1 emits a static pose per FR-11; future task may compute real
+      // pose from viewer.cameraTarget / viewer.cameraOrbit.
+      postToRN({
+        bridgeVersion: BRIDGE_VERSION,
+        event: 'placed',
+        pose: { x: 0, y: 0, z: 0, yaw: 0 },
+      });
+    });
+
+    btnCancel.addEventListener('click', function () {
+      postToRN({ bridgeVersion: BRIDGE_VERSION, event: 'cancelled' });
+    });
+  </script>
+</body>
+</html>

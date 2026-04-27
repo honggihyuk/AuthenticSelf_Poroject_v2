@@ -1,0 +1,125 @@
+{
+  "task_id": "DB-schema-init",
+  "version": 1,
+  "criteria": [
+    {
+      "id": "AC-1",
+      "given": "A fresh empty MySQL 8 schema 'authenticself' with no prior tables.",
+      "when": "Spring Boot starts with Flyway enabled and executes the V1 migration.",
+      "then": "information_schema.tables for schema 'authenticself' contains exactly the four business tables users, spaces, furniture, wishlist (plus flyway_schema_history).",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-2",
+      "given": "The V1 migration has been applied.",
+      "when": "SHOW COLUMNS FROM users is executed.",
+      "then": "Result includes user_id (VARCHAR, NOT NULL, PRI), name (VARCHAR, NOT NULL), email (VARCHAR, NOT NULL, UNI), created_at, updated_at.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-3",
+      "given": "The V1 migration has been applied.",
+      "when": "SHOW COLUMNS FROM spaces is executed.",
+      "then": "Result includes room_id (PK), user_id, dimensions, main_color, style, analysis_date (DATETIME), all NOT NULL.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-4",
+      "given": "The V1 migration has been applied.",
+      "when": "SHOW COLUMNS FROM furniture is executed.",
+      "then": "Result includes furniture_id (PK), type, style, size — all VARCHAR NOT NULL.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-5",
+      "given": "The V1 migration has been applied.",
+      "when": "SHOW COLUMNS FROM wishlist is executed.",
+      "then": "Result includes wishlist_id, user_id, furniture_id, category (all NOT NULL), price of type INT, and status of type ENUM('Active','Purchased') with default 'Active'.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-6",
+      "given": "Each of the four business tables exists.",
+      "when": "Querying information_schema.table_constraints WHERE constraint_type='PRIMARY KEY' for each table.",
+      "then": "Exactly one PRIMARY KEY per table on user_id, room_id, furniture_id, wishlist_id respectively.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-7",
+      "given": "The V1 migration has been applied with empty users table.",
+      "when": "Attempting INSERT INTO spaces(room_id, user_id, dimensions, main_color, style, analysis_date) VALUES('r1','u_nonexistent','1x1','#fff','Modern', NOW()).",
+      "then": "MySQL rejects the insert with error 1452 (a foreign key constraint fails) referencing fk_spaces_user.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-8",
+      "given": "The V1 migration has been applied.",
+      "when": "Attempting to insert a wishlist row whose user_id does not exist in users.",
+      "then": "MySQL rejects with foreign key error 1452 referencing fk_wishlist_user.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-9",
+      "given": "The V1 migration has been applied and a valid user exists.",
+      "when": "Attempting to insert a wishlist row whose furniture_id does not exist in furniture.",
+      "then": "MySQL rejects with foreign key error 1452 referencing fk_wishlist_furniture.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-10",
+      "given": "An existing user u1 and furniture f1 exist.",
+      "when": "Executing INSERT INTO wishlist(..., status) VALUES(..., 'Pending').",
+      "then": "MySQL rejects the insert with a data truncation / invalid enum value error. Inserting status='Active' and status='Purchased' both succeed.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-11",
+      "given": "An existing user u1 and furniture f1 exist.",
+      "when": "Inserting a wishlist row without specifying the status column.",
+      "then": "SELECT status FROM wishlist WHERE wishlist_id=... returns 'Active'.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-12",
+      "given": "The V1 migration has been applied.",
+      "when": "Executing SHOW INDEX FROM spaces WHERE Key_name='idx_spaces_user_id'.",
+      "then": "Exactly one row is returned with Column_name='user_id' and Non_unique=1.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-13",
+      "given": "The V1 migration has been applied.",
+      "when": "Executing SHOW INDEX FROM wishlist WHERE Key_name='idx_wishlist_user_id'.",
+      "then": "Exactly one row is returned with Column_name='user_id' and Non_unique=1.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-14",
+      "given": "The repository at src/backend/src/main/resources/db/migration/.",
+      "when": "Listing files matching V1__*.sql and checking flyway_schema_history after Spring Boot starts.",
+      "then": "Exactly one file exists named precisely 'V1__init_schema.sql', and flyway_schema_history has one row with version='1', description='init schema', success=1.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-15",
+      "given": "All four business tables exist.",
+      "when": "Selecting every column_name from information_schema.columns for the four tables.",
+      "then": "No column name contains any uppercase letter (regex [A-Z] matches zero column names) — all identifiers are snake_case.",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-16",
+      "given": "All four business tables exist.",
+      "when": "Querying information_schema.tables.TABLE_COLLATION for each of users, spaces, furniture, wishlist.",
+      "then": "Every table's collation is 'utf8mb4_unicode_ci'.",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-17",
+      "given": "The Spring Boot project source tree.",
+      "when": "Inspecting src/backend/src/main/java/com/authenticself/domain/ and running the build.",
+      "then": "Exactly four files exist — User.java, Space.java, Furniture.java, Wishlist.java — each carrying @Entity and @Table(name='<snake_case_table>'), and the module compiles successfully.",
+      "test_type": "unit"
+    }
+  ]
+}

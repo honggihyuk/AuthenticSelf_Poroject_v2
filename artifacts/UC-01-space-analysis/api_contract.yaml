@@ -1,0 +1,266 @@
+openapi: 3.0.3
+info:
+  title: AuthenticSelf — UC-01-space-analysis
+  version: 0.1.0
+  description: |
+    Combined contract for two services introduced by Task 3:
+      * Python FastAPI (space-analysis)        — `GET /health`, `POST /analyze/space`
+      * Spring internal trigger + orchestrator — `POST /internal/v1/spaces/{roomId}/analyze`
+
+    The Spring `/internal/v1/*` family is NOT public. Production ingress
+    must block it; it ships in this OpenAPI file for operator/test
+    tooling only. AC-14: `/analyze/style` is intentionally absent.
+
+servers:
+  - url: http://localhost:8001
+    description: Python AI service (default port 8001)
+  - url: http://localhost:8080
+    description: Spring backend (default port 8080)
+
+# =============================================================================
+# PATHS
+# =============================================================================
+paths:
+
+  # ---------------------------------------------------------------------------
+  # Python: GET /health
+  # ---------------------------------------------------------------------------
+  /health:
+    get:
+      tags: [ai-service]
+      summary: Liveness probe (FR-2 / AC-3)
+      operationId: aiHealth
+      responses:
+        '200':
+          description: Service is up and analyzers are reachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # ---------------------------------------------------------------------------
+  # Python: POST /analyze/space
+  # ---------------------------------------------------------------------------
+  /analyze/space:
+    post:
+      tags: [ai-service]
+      summary: Extract dimensions + main color from a room photo (FR-3)
+      operationId: aiAnalyzeSpace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpaceAnalyzeRequest'
+      responses:
+        '200':
+          description: Analysis succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpaceAnalysisResponse'
+        '422':
+          description: |
+            One of: `INVALID_REQUEST`, `IMAGE_NOT_FOUND`, `IMAGE_READ_FAILED`,
+            `ANALYSIS_FAILED`. Body is the Python error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PythonErrorResponse'
+        '500':
+          description: Unexpected internal error (`INTERNAL_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PythonErrorResponse'
+
+  # ---------------------------------------------------------------------------
+  # Spring: POST /internal/v1/spaces/{roomId}/analyze
+  # ---------------------------------------------------------------------------
+  /internal/v1/spaces/{roomId}/analyze:
+    post:
+      tags: [backend-internal]
+      summary: Trigger AI analysis for a space (FR-13)
+      operationId: backendAnalyzeSpace
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 64 }
+          description: ULID/UUID identifying the space row.
+      responses:
+        '200':
+          description: |
+            Either the happy-path ANALYZED body, or the short-circuit
+            `{skipped:true, reason:"NOT_PENDING"}` body when the row is not
+            in `PENDING_ANALYSIS`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpaceAnalysisResultDTO'
+        '404':
+          description: Space row not found for the given roomId.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+              examples:
+                spaceNotFound:
+                  value:
+                    errorCode: SPACE_NOT_FOUND
+                    message: "해당 공간을 찾을 수 없습니다."
+                    correlationId: 9f3a...
+        '422':
+          description: |
+            Analyzer failure — one of `ANALYSIS_IMAGE_NOT_FOUND`,
+            `ANALYSIS_IMAGE_READ_FAILED`, `ANALYSIS_FAILED`. The row has been
+            flipped to `status='FAILED'` on the way out (FR-12 step 5).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+        '500':
+          description: Unexpected server error (catch-all).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+        '502':
+          description: |
+            Python service unreachable or returned an un-parseable body.
+            Error code is `AI_SERVICE_UNAVAILABLE`. Row stays at
+            `PENDING_ANALYSIS` so the poller retries next tick (FR-15 / AC-19).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringErrorResponse'
+
+# =============================================================================
+# SCHEMAS
+# =============================================================================
+components:
+  schemas:
+
+    # ---------------- Python ----------------
+
+    HealthResponse:
+      type: object
+      required: [status, service, version]
+      properties:
+        status:  { type: string, example: ok }
+        service: { type: string, example: space-analysis }
+        version: { type: string, example: "0.1.0" }
+
+    SpaceAnalyzeRequest:
+      type: object
+      required: [roomId, photoUrl]
+      additionalProperties: false
+      properties:
+        roomId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: "^[A-Za-z0-9_-]+$"
+          example: 01HXYB2K9VQWM4P3ZT6N5C8DAE
+        photoUrl:
+          type: string
+          minLength: 8
+          pattern: "^file://.+"
+          example: file:///C:/AuthenticSelf_Project/AuthenticSelf_v3/var/object-storage/spaces/2026/04/17/01HXYB2K9VQWM4P3ZT6N5C8DAE.jpg
+
+    Dimensions:
+      type: object
+      required: [widthM, lengthM, heightM, areaM2]
+      additionalProperties: false
+      properties:
+        widthM:  { type: number, format: float, minimum: 0.0, example: 3.6 }
+        lengthM: { type: number, format: float, minimum: 0.0, example: 4.2 }
+        heightM: { type: number, format: float, minimum: 0.0, example: 2.4 }
+        areaM2:  { type: number, format: float, minimum: 0.0, example: 15.12 }
+
+    SpaceAnalysisResponse:
+      type: object
+      required: [roomId, status, dimensions, mainColor, confidence, processingMs]
+      additionalProperties: false
+      properties:
+        roomId: { type: string }
+        status: { type: string, enum: [OK] }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        mainColor:
+          type: string
+          pattern: "^#[0-9A-F]{6}$"
+          example: "#E8D9B0"
+        confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          example: 0.78
+        processingMs:
+          type: integer
+          minimum: 0
+          example: 142
+
+    PythonErrorResponse:
+      type: object
+      required: [errorCode, message]
+      additionalProperties: false
+      properties:
+        errorCode:
+          type: string
+          enum:
+            - INVALID_REQUEST
+            - IMAGE_NOT_FOUND
+            - IMAGE_READ_FAILED
+            - ANALYSIS_FAILED
+            - INTERNAL_ERROR
+        message: { type: string }
+        roomId:  { type: string, nullable: true }
+
+    # ---------------- Spring ----------------
+
+    SpaceAnalysisResultDTO:
+      type: object
+      required: [roomId, status]
+      properties:
+        roomId:      { type: string }
+        status:
+          type: string
+          enum: [ANALYZED, PENDING_ANALYSIS, FAILED]
+        dimensions:
+          type: string
+          nullable: true
+          pattern: "^\\d+(\\.\\d+)?x\\d+(\\.\\d+)?x\\d+(\\.\\d+)?m$"
+          example: "3.6x4.2x2.4m"
+        mainColor:
+          type: string
+          nullable: true
+          pattern: "^#[0-9A-F]{6}$"
+        processingMs:
+          type: integer
+          nullable: true
+          minimum: 0
+        skipped:
+          type: boolean
+          nullable: true
+          description: Present (and true) on short-circuit responses.
+        reason:
+          type: string
+          nullable: true
+          enum: [NOT_PENDING]
+
+    SpringErrorResponse:
+      type: object
+      required: [errorCode, message, correlationId]
+      properties:
+        errorCode:
+          type: string
+          enum:
+            - ANALYSIS_IMAGE_NOT_FOUND
+            - ANALYSIS_IMAGE_READ_FAILED
+            - ANALYSIS_FAILED
+            - AI_SERVICE_UNAVAILABLE
+            - SPACE_NOT_FOUND
+            - STORAGE_PERSIST_FAILED
+        message:       { type: string }
+        correlationId: { type: string, format: uuid }

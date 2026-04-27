@@ -1,0 +1,370 @@
+[
+  {
+    "id": "AC-1",
+    "fr_ref": "D-1",
+    "layer": "static",
+    "description": "Spec explicitly documents the product downgrade: 'AR' in this iteration = WebXR on supported devices + interactive 3-D viewer fallback, not Unity AR Foundation. Rationale and future-task ('AR-furniture-placement-unity-v2') are named in spec §5 D-1.",
+    "verify_by": "grep",
+    "target_file_or_test": "artifacts/AR-furniture-placement/spec.md:^### D-1"
+  },
+  {
+    "id": "AC-2",
+    "fr_ref": "D-2",
+    "layer": "static",
+    "description": "Spec picks per-category default GLB models (four files: desk/bed/chair/lighting) and documents upgrade path to furniture.model_url column.",
+    "verify_by": "grep",
+    "target_file_or_test": "artifacts/AR-furniture-placement/spec.md:^### D-2"
+  },
+  {
+    "id": "AC-3",
+    "fr_ref": "D-3",
+    "layer": "static",
+    "description": "Spec picks try-and-fallback capability detection (Option B): always navigate; scene posts AR_NOT_SUPPORTED on canActivateAR=false.",
+    "verify_by": "grep",
+    "target_file_or_test": "artifacts/AR-furniture-placement/spec.md:^### D-3"
+  },
+  {
+    "id": "AC-4",
+    "fr_ref": "D-4",
+    "layer": "static",
+    "description": "Spec picks floating '배치 완료' button inside HTML overlay with '취소' secondary; post-commit Alert offers '위시리스트에 추가' / '닫기'.",
+    "verify_by": "grep",
+    "target_file_or_test": "artifacts/AR-furniture-placement/spec.md:^### D-4"
+  },
+  {
+    "id": "AC-5",
+    "fr_ref": "D-5",
+    "layer": "static",
+    "description": "Spec picks RN-layer tests only (Option C), mocking the WebView. Zero Unity test infra required.",
+    "verify_by": "grep",
+    "target_file_or_test": "artifacts/AR-furniture-placement/spec.md:^### D-5"
+  },
+  {
+    "id": "AC-6",
+    "fr_ref": "D-6",
+    "layer": "static",
+    "description": "Spec pins platform targets: iOS 13+ and Android 7+ with Chrome 79+. Below-threshold devices fall through to fallback panel.",
+    "verify_by": "grep",
+    "target_file_or_test": "artifacts/AR-furniture-placement/spec.md:^### D-6"
+  },
+  {
+    "id": "AC-7",
+    "fr_ref": "FR-1",
+    "layer": "mobile",
+    "description": "RecommendationScreen.tsx contains a new Pressable per ItemCard with testID 'btn-ar-{furnitureId}' and label 'AR로 배치'. Existing 'btn-wishlist-{furnitureId}' Pressable remains.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/src/screens/RecommendationScreen.tsx:btn-ar-"
+  },
+  {
+    "id": "AC-8",
+    "fr_ref": "FR-2",
+    "layer": "mobile",
+    "description": "App.tsx RootStackParamList contains 'ARPlacement: { roomId: string; item: RecommendationItem }' and registers the Stack.Screen at the end of the navigator.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/App.tsx:ARPlacement"
+  },
+  {
+    "id": "AC-9",
+    "fr_ref": "FR-3",
+    "layer": "mobile",
+    "description": "src/mobile/src/ar/bridge.ts exports AR_BRIDGE_VERSION=1, InboundARMessage, OutboundARMessage, OutboundARErrorCode, encodeInbound, decodeOutbound.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/src/ar/bridge.ts:export (const|type|function)"
+  },
+  {
+    "id": "AC-10",
+    "fr_ref": "FR-11",
+    "layer": "static",
+    "description": "placement.html contains a <model-viewer> element with the 'ar' attribute and the three ar-modes keywords 'webxr', 'scene-viewer', 'quick-look'.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/assets/ar/placement.html:ar-modes=\"webxr scene-viewer quick-look\""
+  },
+  {
+    "id": "AC-11",
+    "fr_ref": "FR-11",
+    "layer": "static",
+    "description": "placement.html contains the two Korean overlay buttons: '배치 완료' (btn-place) and '취소' (btn-cancel).",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/assets/ar/placement.html:배치 완료"
+  },
+  {
+    "id": "AC-12",
+    "fr_ref": "FR-11",
+    "layer": "static",
+    "description": "placement.html pins the model-viewer CDN URL to version 3.5.0: 'https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js'.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/assets/ar/placement.html:ajax.googleapis.com/ajax/libs/model-viewer/3.5.0"
+  },
+  {
+    "id": "AC-13",
+    "fr_ref": "FR-13",
+    "layer": "static",
+    "description": "All four placeholder GLB files exist: desk.glb, bed.glb, chair.glb, lighting.glb under src/mobile/assets/ar/models/.",
+    "verify_by": "file_exists",
+    "target_file_or_test": "src/mobile/assets/ar/models/{desk,bed,chair,lighting}.glb"
+  },
+  {
+    "id": "AC-14",
+    "fr_ref": "FR-13",
+    "layer": "static",
+    "description": "Each of the four GLB files is > 0 bytes (placeholder valid-header permissible; zero-byte file fails).",
+    "verify_by": "file_size",
+    "target_file_or_test": "src/mobile/assets/ar/models/*.glb"
+  },
+  {
+    "id": "AC-15",
+    "fr_ref": "FR-11",
+    "layer": "static",
+    "description": "placement.html contains viewport meta tag with 'width=device-width, initial-scale=1, viewport-fit=cover'.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/assets/ar/placement.html:viewport-fit=cover"
+  },
+  {
+    "id": "AC-16",
+    "fr_ref": "FR-11",
+    "layer": "static",
+    "description": "placement.html uses 'window.ReactNativeWebView.postMessage' verbatim for outbound messages.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/assets/ar/placement.html:ReactNativeWebView.postMessage"
+  },
+  {
+    "id": "AC-17",
+    "fr_ref": "FR-5",
+    "layer": "mobile",
+    "description": "ARPlacementScreen.tsx exists at src/mobile/src/screens/ARPlacementScreen.tsx and default-exports a React component.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/src/screens/ARPlacementScreen.tsx:export default function ARPlacementScreen"
+  },
+  {
+    "id": "AC-18",
+    "fr_ref": "FR-2",
+    "layer": "mobile",
+    "description": "App.tsx <Stack.Screen> order is Home, Upload, Analyzing, StyleSelection, Recommendation, Wishlist, ARPlacement — ARPlacement appended at the end; no reorder of the first six.",
+    "verify_by": "grep_sequence",
+    "target_file_or_test": "src/mobile/App.tsx:Stack.Screen name=\"(Home|Upload|Analyzing|StyleSelection|Recommendation|Wishlist|ARPlacement)\""
+  },
+  {
+    "id": "AC-19",
+    "fr_ref": "FR-14",
+    "layer": "mobile",
+    "description": "bridge.test.ts covers encodeInbound (load + unload), decodeOutbound (placed + cancelled + all 4 error codes), and rejects wrong bridgeVersion, missing fields, unknown event names.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/bridge.test.ts"
+  },
+  {
+    "id": "AC-20",
+    "fr_ref": "FR-4",
+    "layer": "mobile",
+    "description": "ARPlacementScreen.tsx contains the four per-type dimension tuples verbatim: desk {1.20,0.60,0.74}, bed {1.60,2.00,0.45}, chair {0.55,0.55,0.90}, lighting {0.30,0.30,1.50}; colorHex in inbound load is null.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/src/screens/ARPlacementScreen.tsx:(1.20|1.60|0.55|0.30).*(0.60|2.00|0.55|0.30).*(0.74|0.45|0.90|1.50)"
+  },
+  {
+    "id": "AC-21",
+    "fr_ref": "FR-15",
+    "layer": "mobile",
+    "description": "Mounting ARPlacementScreen renders an element with testID 'ar-webview'.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:renders ar-webview on mount"
+  },
+  {
+    "id": "AC-22",
+    "fr_ref": "FR-7",
+    "layer": "mobile",
+    "description": "Emitting {event:'placed',pose:{x,y,z,yaw}} from the mocked WebView triggers Alert.alert with title '배치 완료' and message '위시리스트에 추가하시겠습니까?'.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:placed triggers Alert with title and message"
+  },
+  {
+    "id": "AC-23",
+    "fr_ref": "FR-7",
+    "layer": "mobile",
+    "description": "The Alert shown on 'placed' contains exactly two buttons with labels '위시리스트에 추가' and '닫기'.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:placed Alert buttons are 위시리스트에 추가 and 닫기"
+  },
+  {
+    "id": "AC-24",
+    "fr_ref": "FR-7",
+    "layer": "mobile",
+    "description": "Tapping '위시리스트에 추가' in the Alert calls addToWishlist with {furnitureId, category: item.type, price: item.price} sourced from the route param's item.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:Alert 위시리스트에 추가 calls addToWishlist"
+  },
+  {
+    "id": "AC-25",
+    "fr_ref": "FR-8",
+    "layer": "mobile",
+    "description": "Emitting {event:'cancelled'} calls navigation.goBack and does NOT call addToWishlist or show any Alert.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:cancelled calls goBack and skips Alert"
+  },
+  {
+    "id": "AC-26",
+    "fr_ref": "FR-6",
+    "layer": "mobile",
+    "description": "For each OutboundARErrorCode (AR_NOT_SUPPORTED, AR_CAMERA_DENIED, AR_MODEL_LOAD_FAILED, AR_SESSION_ERROR), emitting the error renders the matching Korean copy from AR_ERROR_COPY. Four sub-assertions.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:error code renders Korean copy"
+  },
+  {
+    "id": "AC-27",
+    "fr_ref": "FR-6",
+    "layer": "mobile",
+    "description": "On any error event the 'ar-webview' testID is removed from the rendered tree; 'ar-fallback' testID is present.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:error hides ar-webview and shows ar-fallback"
+  },
+  {
+    "id": "AC-28",
+    "fr_ref": "FR-7",
+    "layer": "mobile",
+    "description": "After dismissing the placed-confirmation Alert (via either button), the ARPlacementScreen is unmounted (navigation side-effect fires).",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:Alert dismissal unmounts screen"
+  },
+  {
+    "id": "AC-29",
+    "fr_ref": "FR-10",
+    "layer": "mobile",
+    "description": "After unmount of ARPlacementScreen under fake timers, jest.getTimerCount() === 0 and no lingering listener references on the webviewRef.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:teardown leaves no pending timers"
+  },
+  {
+    "id": "AC-30",
+    "fr_ref": "FR-7",
+    "layer": "mobile",
+    "description": "emitArFurniturePlaced is invoked exactly once per 'placed' event with (roomId, furnitureId, pose).",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:emitArFurniturePlaced called exactly once"
+  },
+  {
+    "id": "AC-31",
+    "fr_ref": "FR-9",
+    "layer": "mobile",
+    "description": "On wishlist-add success / already-exists / already-purchased / network-error / api-error branches, the toast / alert copy matches RecommendationScreen's byte-for-byte: '위시리스트에 담았어요.', '이미 위시리스트에 있어요.', '이미 구매 완료로 표시된 항목이에요.', '네트워크 오류로 추가하지 못했어요.', '위시리스트에 추가하지 못했어요.'.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:wishlist-add toast strings match RecommendationScreen"
+  },
+  {
+    "id": "AC-32",
+    "fr_ref": "FR-6",
+    "layer": "mobile",
+    "description": "Tapping 'btn-ar-back' on the fallback panel calls navigation.goBack.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:btn-ar-back calls goBack"
+  },
+  {
+    "id": "AC-33",
+    "fr_ref": "FR-12",
+    "layer": "infra",
+    "description": "src/mobile/package.json dependencies contains 'react-native-webview' pinned to a 13.x version.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/package.json:\"react-native-webview\": \"[~^]?13\\."
+  },
+  {
+    "id": "AC-34",
+    "fr_ref": "FR-16",
+    "layer": "mobile",
+    "description": "RecommendationScreen.test.tsx asserts btn-ar-{furnitureId} testID is present for every rendered card in a multi-category fixture.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/RecommendationScreen.test.tsx:btn-ar present per card"
+  },
+  {
+    "id": "AC-35",
+    "fr_ref": "FR-16",
+    "layer": "mobile",
+    "description": "Tapping btn-ar-{furnitureId} calls navigation.navigate('ARPlacement', {roomId, item}) with the card's own item and the screen's roomId.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/RecommendationScreen.test.tsx:btn-ar navigate carries item"
+  },
+  {
+    "id": "AC-36",
+    "fr_ref": "FR-1, FR-16",
+    "layer": "cross-task",
+    "description": "Existing RecommendationScreen AC-48 (analytics emit on wishlist add) and UC-02 AC-49 (addToWishlist call on tap) regressions remain green. Neither assertion is renamed, deleted, or re-scoped by this task.",
+    "verify_by": "unit_test_full_suite",
+    "target_file_or_test": "src/mobile/__tests__/RecommendationScreen.test.tsx"
+  },
+  {
+    "id": "AC-37",
+    "fr_ref": "FR-17",
+    "layer": "cross-task",
+    "description": "Git diff under src/backend, src/ai, src/mobile/src/api between the task branch and the base is empty (no files added, modified, or deleted).",
+    "verify_by": "git_diff_stat",
+    "target_file_or_test": "task/AR-furniture-placement:src/backend src/ai src/mobile/src/api"
+  },
+  {
+    "id": "AC-38",
+    "fr_ref": "FR-18",
+    "layer": "contract",
+    "description": "artifacts/AR-furniture-placement/api_contract.yaml exists and parses as valid YAML. It documents the bridge inbound/outbound message schemas (NOT an OpenAPI 3.x document — a comment at the top declares so).",
+    "verify_by": "yaml_parse",
+    "target_file_or_test": "artifacts/AR-furniture-placement/api_contract.yaml"
+  },
+  {
+    "id": "AC-39",
+    "fr_ref": "NFR-accessibility",
+    "layer": "mobile",
+    "description": "Both the 'AR로 배치' button on RecommendationScreen and the '돌아가기' button on the fallback panel expose accessibilityLabel and accessibilityRole='button'.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/ARPlacementScreen.test.tsx:accessibility labels present"
+  },
+  {
+    "id": "AC-40",
+    "fr_ref": "FR-19",
+    "layer": "static",
+    "description": "App.tsx contains exactly seven <Stack.Screen name=\"...\"> declarations in this order: Home, Upload, Analyzing, StyleSelection, Recommendation, Wishlist, ARPlacement.",
+    "verify_by": "grep_ordered",
+    "target_file_or_test": "src/mobile/App.tsx"
+  },
+  {
+    "id": "AC-41",
+    "fr_ref": "FR-20",
+    "layer": "cross-task",
+    "description": "Full mobile jest suite (UploadScreen, AnalyzingScreen, StyleSelectionScreen, RecommendationScreen, WishlistScreen, HomeScreen, pollSchedule, styleTypes, errorMessages, bridge, ARPlacementScreen) exits 0.",
+    "verify_by": "unit_test_full_suite",
+    "target_file_or_test": "src/mobile"
+  },
+  {
+    "id": "AC-42",
+    "fr_ref": "NFR-privacy",
+    "layer": "static",
+    "description": "placement.html does not contain any of: 'google-analytics', 'gtag', 'facebook.com', 'amplitude', 'mixpanel'. Only the pinned model-viewer CDN URL is external.",
+    "verify_by": "grep_negative",
+    "target_file_or_test": "src/mobile/assets/ar/placement.html:google-analytics|gtag|facebook.com|amplitude|mixpanel"
+  },
+  {
+    "id": "AC-43",
+    "fr_ref": "FR-3",
+    "layer": "mobile",
+    "description": "decodeOutbound throws when bridgeVersion != 1; throws when event is not one of placed|cancelled|error; throws when event='placed' lacks pose; throws when event='error' lacks errorCode.",
+    "verify_by": "unit_test",
+    "target_file_or_test": "src/mobile/__tests__/bridge.test.ts:decodeOutbound rejects invalid inputs"
+  },
+  {
+    "id": "AC-44",
+    "fr_ref": "FR-11",
+    "layer": "static",
+    "description": "placement.html installs a global hook named window.__authenticSelfBridgeLoad that RN's injectJavaScript invokes to deliver the inbound load message.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/mobile/assets/ar/placement.html:__authenticSelfBridgeLoad"
+  },
+  {
+    "id": "AC-45",
+    "fr_ref": "D-1, FR-17",
+    "layer": "cross-task",
+    "description": "No Unity project directory (src/unity/, Assets/, ProjectSettings/) is created; no C# files are added to the repo.",
+    "verify_by": "git_diff_stat",
+    "target_file_or_test": "task/AR-furniture-placement:src/unity Assets ProjectSettings *.cs"
+  },
+  {
+    "id": "AC-46",
+    "fr_ref": "FR-17",
+    "layer": "cross-task",
+    "description": "No Flyway migration file is added or modified; V1..V7 under src/backend/src/main/resources/db/migration/ are byte-identical to the base branch.",
+    "verify_by": "git_diff_stat",
+    "target_file_or_test": "task/AR-furniture-placement:src/backend/src/main/resources/db/migration"
+  }
+]

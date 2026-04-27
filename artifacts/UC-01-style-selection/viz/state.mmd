@@ -1,0 +1,136 @@
+%% AuthenticSelf - UC-01-style-selection: spaces.status lifecycle + style/preferred_style dimensions
+%% UPDATED from artifacts/UC-01-space-analysis/viz/state.mmd
+%%
+%% Delta from Task 3:
+%%   - ANALYZED now has TWO sub-states visible from `spaces.style`:
+%%         ANALYZED(style=set)  -- both space + style succeeded (FR-12 "both OK")
+%%         ANALYZED(style=null) -- degraded success: style call failed (FR-12 "style-only failure")
+%%     The parent status is the same ANALYZED either way; the sub-state is a
+%%     view over the `spaces.style` column.
+%%   - NEW dimension: `spaces.preferred_style` — user-choice, orthogonal to
+%%     status. Starts NULL; user PUTs any of six values while status=ANALYZED.
+%%
+%% Source of truth:
+%%   src/backend/src/main/java/com/authenticself/ai/AIOrchestrator.java
+%%   src/backend/src/main/java/com/authenticself/ai/SpaceAnalysisPersistence.java
+%%   src/backend/src/main/java/com/authenticself/space/SpaceController.java
+%%   src/backend/src/main/java/com/authenticself/space/PreferredStyle.java
+%%   src/backend/src/main/resources/db/migration/V3__add_preferred_style.sql
+%%   src/backend/src/main/java/com/authenticself/domain/Space.java
+
+%% ============================================================
+%% Dimension 1: spaces.status (updated with style sub-states)
+%% ============================================================
+stateDiagram-v2
+    direction TB
+
+    [*] --> PENDING_ANALYSIS : POST /api/v1/spaces/photo (Task 2 FR-4)
+
+    state ANALYZED {
+        direction LR
+        [*] --> style_set
+        style_set : style = "MODERN" | "SIMPLE" | ...<br/>both space+style succeeded<br/>Task 4 FR-12 "both OK" / AC-14
+        style_null : style = NULL<br/>space succeeded, style analyser failed or transport failed<br/>Task 4 FR-12 "style-only failure" / AC-15<br/>(degraded success - user still reaches StyleSelection)
+        style_null --> style_set : (future) backfill reanalysis<br/>OUT OF SCOPE Task 4
+    }
+
+    PENDING_ANALYSIS --> ANALYZED : Space OK (Task 4 FR-12)<br/>markAnalyzed(dims, mainColor, style?)<br/>AC-14 (style set) / AC-15 (style null)
+
+    PENDING_ANALYSIS --> FAILED : Space analyzer error 422<br/>markFailed() - style discarded<br/>Task 4 FR-12 / AC-16<br/>(Task 3 FR-12 step 5 / AC-18 still applies)
+
+    PENDING_ANALYSIS --> PENDING_ANALYSIS : Space transport failure<br/>NO DB write - poller retries<br/>Task 4 FR-12 / AC-17 (unchanged from Task 3 AC-19)
+
+    ANALYZED --> ANALYZED : Re-trigger short-circuit<br/>Task 3 FR-12 step 2 / AC-17 (unchanged)<br/>also serves PUT preferred-style (separate dimension)
+
+    FAILED --> FAILED : Re-trigger short-circuit (unchanged)
+
+    ANALYZED --> [*] : consumed by UC-01-recommendation (Task 5)
+    FAILED --> [*] : user must re-upload
+
+    note right of ANALYZED
+        spaces.style column:
+          style_set  -> "MODERN" | "SIMPLE" | "CLASSIC" |
+                        "SCANDINAVIAN" | "INDUSTRIAL"
+          style_null -> NULL (degraded - partial success)
+        RN StyleSelectionScreen handles both:
+          - style_set:  badge "AI가 감지한 스타일: X (72%)"
+          - style_null: fallback "AI 스타일 감지 실패 - 직접 선택"
+        Task 4 FR-18 / AC-28 / AC-29
+    end note
+
+    note right of PENDING_ANALYSIS
+        RN AnalyzingScreen polls here with
+        exponential backoff (FR-19 / AC-31).
+        After 60s budget -> client-side UI
+        timeout (does NOT flip DB to FAILED).
+    end note
+
+    note right of FAILED
+        Style outcome discarded even if successful
+        (Task 4 AC-16). UI surfaces re-upload CTA.
+    end note
+
+%% ============================================================
+%% Dimension 2: spaces.preferred_style (user-choice, independent)
+%% ============================================================
+%% Second stateDiagram-v2 block — Mermaid renders two diagrams in
+%% the same file when the parser sees another top-level diagram.
+---
+stateDiagram-v2
+    direction LR
+
+    [*] --> PS_NULL : row inserted by upload (Task 2)<br/>preferred_style defaults to NULL<br/>V3 migration AC-9
+
+    PS_NULL : preferred_style = NULL<br/>user has not picked yet
+    PS_CURRENT : preferred_style = "CURRENT"<br/>"현재 디자인 그대로" (user wants AI-matched)
+    PS_MODERN : preferred_style = "MODERN"
+    PS_SIMPLE : preferred_style = "SIMPLE"
+    PS_CLASSIC : preferred_style = "CLASSIC"
+    PS_SCANDINAVIAN : preferred_style = "SCANDINAVIAN"
+    PS_INDUSTRIAL : preferred_style = "INDUSTRIAL"
+
+    PS_NULL --> PS_CURRENT : PUT /preferred-style {"CURRENT"}<br/>FR-14 / AC-22 / AC-26
+    PS_NULL --> PS_MODERN : PUT {"MODERN"} / AC-22
+    PS_NULL --> PS_SIMPLE : PUT {"SIMPLE"}
+    PS_NULL --> PS_CLASSIC : PUT {"CLASSIC"}
+    PS_NULL --> PS_SCANDINAVIAN : PUT {"SCANDINAVIAN"}
+    PS_NULL --> PS_INDUSTRIAL : PUT {"INDUSTRIAL"}
+
+    PS_CURRENT --> PS_MODERN : PUT re-do / AC-23 idempotent latest-wins
+    PS_MODERN --> PS_SIMPLE : PUT re-do / AC-23
+    PS_SIMPLE --> PS_CLASSIC : PUT re-do
+    PS_CLASSIC --> PS_CURRENT : PUT re-do
+    PS_SCANDINAVIAN --> PS_MODERN : PUT re-do
+    PS_INDUSTRIAL --> PS_SIMPLE : PUT re-do
+
+    note right of PS_NULL
+        Guard: SpaceController rejects PUT with 409
+        ANALYSIS_NOT_READY unless status=ANALYZED
+        (Task 4 FR-14 / AC-25).
+        Unknown enum -> 400 INVALID_PREFERRED_STYLE
+        (AC-24). Unauthorised X-User-Id -> 403
+        SPACE_ACCESS_DENIED (AC-20).
+    end note
+
+%% ---------------------------------------------------------------
+%% Legend (FR / AC traceability)
+%% ---------------------------------------------------------------
+%% DIMENSION 1 — spaces.status with style sub-states
+%%   [*] -> PENDING_ANALYSIS ........ Task 2 FR-4 / AC-6 (unchanged)
+%%   PENDING -> ANALYZED (both OK) .. Task 4 FR-12 / AC-14
+%%   PENDING -> ANALYZED (style NULL) Task 4 FR-12 / AC-15 (degraded success)
+%%   PENDING -> FAILED .............. Task 4 FR-12 / AC-16 (+ Task 3 AC-18)
+%%   PENDING self (transport) ....... Task 4 FR-12 / AC-17 (+ Task 3 AC-19)
+%%   ANALYZED self (short-circuit) .. Task 3 FR-12 step 2 / AC-17 (unchanged)
+%%   style_null -> style_set ........ OUT OF SCOPE Task 4 (future backfill task)
+%%
+%% DIMENSION 2 — spaces.preferred_style (orthogonal to status)
+%%   NULL -> {six values} ........... Task 4 FR-14 / AC-22 / AC-26
+%%   idempotent latest-wins ......... Task 4 AC-23
+%%   Guard: status==ANALYZED ........ Task 4 AC-25 (409 ANALYSIS_NOT_READY)
+%%   Guard: enum value .............. Task 4 AC-24 (400 INVALID_PREFERRED_STYLE)
+%%   Guard: X-User-Id matches owner . Task 4 AC-20 (403 SPACE_ACCESS_DENIED)
+%%
+%% OUT OF SCOPE at this task:
+%%   FAILED -> PENDING manual retry endpoint ... future ops task
+%%   Style-only reanalysis poller .............. future task
