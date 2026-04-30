@@ -24,9 +24,15 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  ToastAndroid,
   View,
 } from 'react-native';
+
+// react-native-web does not re-export ToastAndroid; conditional require keeps
+// the static analyzer happy while preserving Android behaviour.
+const ToastAndroid: typeof import('react-native').ToastAndroid | undefined =
+  Platform.OS === 'android'
+    ? (require('react-native') as typeof import('react-native')).ToastAndroid
+    : undefined;
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList } from '../../App';

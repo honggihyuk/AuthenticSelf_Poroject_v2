@@ -6,6 +6,7 @@ import com.authenticself.ai.dto.RecommendationResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -41,6 +42,7 @@ public class RecommendationClient {
     private final String       baseUrl;
     private final ObjectMapper objectMapper;
 
+    @Autowired
     public RecommendationClient(
             @Value("${app.ai.recommend.base-url:${app.ai.base-url:http://localhost:8001}}")
             String baseUrl,

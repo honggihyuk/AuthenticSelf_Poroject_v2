@@ -10,6 +10,8 @@
  * `PUT /api/v1/spaces/{roomId}/preferred-style`.
  */
 
+import { Platform } from 'react-native';
+
 import type { PreferredStyle, Style } from '../types/style';
 
 export type UploadSuccess = {
@@ -63,13 +65,25 @@ export type SpaceState = {
  * Rejects with an {@link UploadFailedError} on any non-2xx response, carrying
  * the parsed {errorCode, message, correlationId} envelope when available.
  */
-export function uploadPhoto(args: UploadPhotoArgs): Promise<UploadSuccess> {
+export async function uploadPhoto(args: UploadPhotoArgs): Promise<UploadSuccess> {
   const { baseUrl, userId, uri, fileName, mimeType, onProgress } = args;
+
+  // Web FormData rejects React Native's `{uri,name,type}` shape (it stringifies
+  // the object into a text field, leaving the file part empty -> EMPTY_FILE).
+  // On web we fetch the picker URI to get a real Blob; on native we keep the
+  // direct URI passthrough so bytes don't have to round-trip through JS.
+  const filePart: Blob | { uri: string; name?: string; type?: string } =
+    Platform.OS === 'web'
+      ? await fetch(uri).then((r) => r.blob())
+      : { uri, name: fileName, type: mimeType };
 
   return new Promise<UploadSuccess>((resolve, reject) => {
     const form = new FormData();
-    // React Native's FormData accepts this shape for a local file URI.
-    form.append('file', { uri, name: fileName, type: mimeType } as unknown as Blob);
+    if (Platform.OS === 'web') {
+      form.append('file', filePart as Blob, fileName);
+    } else {
+      form.append('file', filePart as unknown as Blob);
+    }
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${baseUrl}/api/v1/spaces/photo`);

@@ -48,7 +48,70 @@ logging:
 # respect the standard Spring property-source chain.
 # ------------------------------------------------------------------
 app:
-  storage:
+  storage:react-dom.development.js:88 Warning: Function components cannot be given refs. Attempts to access this ref will fail. Did you mean to use React.forwardRef()?
+
+Check the render method of `ForwardRef(ARWebView)`.
+    at WebView
+    at ARWebView (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:80756:40)
+    at div
+    at http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:43373:27
+    at ARPlacementScreen (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:80417:22)
+    at StaticContainer (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:65658:18)
+    at EnsureSingleNavigator (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:62207:25)
+    at SceneView (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:65566:23)
+    at div
+    at http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:43373:27
+    at div
+    at http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:43373:27
+    at div
+    at http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:43373:27
+    at Background (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:68024:22)
+    at Screen (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:70845:71)
+    at div
+    at http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:43373:27
+    at SafeAreaFrameProvider (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:70763:32)
+    at div
+    at http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:43373:27
+    at NativeSafeAreaProvider (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:68553:25)
+    at SafeAreaProvider (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:68422:25)
+    at SafeAreaProviderCompat (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:70738:25)
+    at NativeStackView (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:67718:22)
+    at PreventRemoveProvider (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:64282:26)
+    at NavigationContent (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:65359:23)
+    at http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:65374:28
+    at NativeStackNavigator (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:67657:19)
+    at EnsureSingleNavigator (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:62207:25)
+    at BaseNavigationContainer (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:60742:29)
+    at ThemeProvider (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:66658:22)
+    at NavigationContainerInner (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:66549:27)
+    at App
+    at withDevTools(App)
+    at AppContainer (http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app:37596:25)
+
+cdn.example.com/f_bed_001.jpg:1 
+ GET https://cdn.example.com/f_bed_001.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_desk_001.jpg:1 
+ GET https://cdn.example.com/f_desk_001.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_desk_006.jpg:1 
+ GET https://cdn.example.com/f_desk_006.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_desk_002.jpg:1 
+ GET https://cdn.example.com/f_desk_002.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_bed_006.jpg:1 
+ GET https://cdn.example.com/f_bed_006.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_bed_002.jpg:1 
+ GET https://cdn.example.com/f_bed_002.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_lighting_001.jpg:1 
+ GET https://cdn.example.com/f_lighting_001.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_lighting_005.jpg:1 
+ GET https://cdn.example.com/f_lighting_005.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_chair_006.jpg:1 
+ GET https://cdn.example.com/f_chair_006.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_lighting_006.jpg:1 
+ GET https://cdn.example.com/f_lighting_006.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_chair_001.jpg:1 
+ GET https://cdn.example.com/f_chair_001.jpg net::ERR_NAME_NOT_RESOLVED
+cdn.example.com/f_chair_002.jpg:1 
+ GET https://cdn.example.com/f_chair_002.jpg net::ERR_NAME_NOT_RESOLVED
     local:
       root: ${APP_STORAGE_LOCAL_ROOT:./var/object-storage}
   upload:

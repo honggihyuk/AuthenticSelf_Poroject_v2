@@ -85,7 +85,7 @@ FLUSH PRIVILEGES;
 
 ```bash
 # DB 접속
-export DB_URL="jdbc:mysql://localhost:3306/authenticself?useSSL=false&serverTimezone=UTC&characterEncoding=utf8mb4"
+export DB_URL="jdbc:mysql://localhost:3306/authenticself?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8"
 export DB_USER="app"
 export DB_PASSWORD="apppw"
 

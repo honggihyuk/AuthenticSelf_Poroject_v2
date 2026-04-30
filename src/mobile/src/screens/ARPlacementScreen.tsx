@@ -32,9 +32,16 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  ToastAndroid,
   View,
 } from 'react-native';
+
+// react-native-web does not re-export ToastAndroid, so a static import breaks
+// the web bundle. Guarded require keeps the Android path identical while the
+// web path simply leaves the symbol undefined (Platform.OS check below skips it).
+const ToastAndroid: typeof import('react-native').ToastAndroid | undefined =
+  Platform.OS === 'android'
+    ? (require('react-native') as typeof import('react-native')).ToastAndroid
+    : undefined;
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import type { RootStackParamList } from '../../App';

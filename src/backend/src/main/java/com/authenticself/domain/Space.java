@@ -76,8 +76,12 @@ public class Space {
     // UC-01-style-selection (Task 4) FR-10 / AC-18 — user's chosen target
     // style. NULL means the user has not yet selected a preferred style.
     // The V3 migration defines the column as VARCHAR(32) NULL.
+    // columnDefinition pins the JDBC type to VARCHAR so Hibernate 6.4's
+    // MySQL native-ENUM default for @Enumerated(STRING) does not falsely
+    // flag a schema mismatch under ddl-auto=validate.
     @Enumerated(EnumType.STRING)
-    @Column(name = "preferred_style", length = 32, nullable = true)
+    @Column(name = "preferred_style", length = 32, nullable = true,
+            columnDefinition = "VARCHAR(32)")
     private PreferredStyle preferredStyle;
 
     @Column(name = "analysis_date")

@@ -6,6 +6,7 @@ import com.authenticself.ai.dto.StyleAnalysisResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -36,6 +37,7 @@ public class StyleAnalysisClient {
     private final String       baseUrl;
     private final ObjectMapper objectMapper;
 
+    @Autowired
     public StyleAnalysisClient(
             @Value("${app.ai.style.base-url:${app.ai.base-url:http://localhost:8001}}")
             String baseUrl,

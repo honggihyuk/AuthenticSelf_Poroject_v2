@@ -6,6 +6,7 @@ import com.authenticself.ai.dto.SpaceAnalysisResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -36,6 +37,7 @@ public class SpaceAnalysisClient {
     private final String     baseUrl;
     private final ObjectMapper objectMapper;
 
+    @Autowired
     public SpaceAnalysisClient(
             @Value("${app.ai.base-url:${app.ai.space.base-url:http://localhost:8001}}")
             String baseUrl,
