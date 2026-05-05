@@ -10,7 +10,7 @@
     "android": { "package": "com.authenticself.app" },
     "web": { "bundler": "metro" },
     "extra": {
-      "apiBaseUrl": "http://10.200.73.16:8090"
+      "apiBaseUrl": "http://localhost:18080"
     }
   }
 }
