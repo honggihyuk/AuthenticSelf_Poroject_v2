@@ -8,6 +8,10 @@
 !.env.example
 *.pem
 *.key
+# Spring Boot per-environment profile config — local-only.
+# The .example template is committed so collaborators see the schema.
+src/backend/src/main/resources/application-local.yml
+!src/backend/src/main/resources/application-local.yml.example
 
 # ---- Gradle / Java build ----
 build/

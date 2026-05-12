@@ -15,6 +15,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -42,6 +43,7 @@ import {
   RecommendationResponse,
 } from '../api/spaces';
 import { addToWishlist } from '../api/wishlist';
+import { getFurnitureSimilar, SimilarProduct } from '../api/similar';
 import {
   PREFERRED_STYLE_LABELS,
   PreferredStyle,
@@ -303,6 +305,21 @@ function ItemCard({
   const [imageFailed, setImageFailed] = useState<boolean>(false);
   const matchPct = Math.round(item.fitScore * 100);
 
+  // Phase B — "비슷한 실제 상품" cache fetch. Failures fall back to the
+  // placeholder; empty result is the dev-default (Naver creds absent / batch
+  // not yet run) so we never block the card on this network call.
+  const [similar, setSimilar] = useState<SimilarProduct[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getFurnitureSimilar({
+      baseUrl: settings.apiBaseUrl,
+      furnitureId: item.furnitureId,
+    })
+      .then((res) => { if (!cancelled) setSimilar(res.items); })
+      .catch(() => { if (!cancelled) setSimilar([]); });
+    return () => { cancelled = true; };
+  }, [item.furnitureId]);
+
   const onAddToWishlist = async () => {
     // UC-01-recommendation AC-48 — analytics emit MUST still fire
     // exactly once per tap, regardless of whether the real API call
@@ -415,15 +432,47 @@ function ItemCard({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.similarRow}
           >
-            <View style={styles.similarPlaceholder}>
-              <Text style={styles.similarPlaceholderText}>준비 중</Text>
-            </View>
-            <View style={styles.similarPlaceholder}>
-              <Text style={styles.similarPlaceholderText}>준비 중</Text>
-            </View>
-            <View style={styles.similarPlaceholder}>
-              <Text style={styles.similarPlaceholderText}>준비 중</Text>
-            </View>
+            {similar == null ? (
+              // Loading state — match the placeholder footprint so the card
+              // height doesn't jump once data arrives.
+              <View style={[styles.similarPlaceholder, { justifyContent: 'center' }]}>
+                <ActivityIndicator size="small" />
+              </View>
+            ) : similar.length === 0 ? (
+              <>
+                <View style={styles.similarPlaceholder}>
+                  <Text style={styles.similarPlaceholderText}>준비 중</Text>
+                </View>
+                <View style={styles.similarPlaceholder}>
+                  <Text style={styles.similarPlaceholderText}>준비 중</Text>
+                </View>
+                <View style={styles.similarPlaceholder}>
+                  <Text style={styles.similarPlaceholderText}>준비 중</Text>
+                </View>
+              </>
+            ) : (
+              similar.map((s) => (
+                <Pressable
+                  key={`${s.source}-${s.externalId}`}
+                  testID={`similar-card-${item.furnitureId}-${s.externalId}`}
+                  style={styles.similarCard}
+                  onPress={() => { Linking.openURL(s.externalUrl).catch(() => undefined); }}
+                  accessibilityRole="link"
+                  accessibilityLabel={s.title}
+                >
+                  <Image
+                    source={{ uri: s.imageUrl }}
+                    style={styles.similarImage}
+                    referrerPolicy="no-referrer"
+                  />
+                  {s.price != null && (
+                    <Text style={styles.similarPrice} numberOfLines={1}>
+                      {formatKrw(s.price)}
+                    </Text>
+                  )}
+                </Pressable>
+              ))
+            )}
           </ScrollView>
         </View>
       </View>
@@ -500,6 +549,15 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#e6e6e6', borderStyle: 'dashed',
   },
   similarPlaceholderText: { fontSize: 11, color: '#888' },
+  similarCard: {
+    width: 72, marginRight: 8,
+  },
+  similarImage: {
+    width: 72, height: 72, borderRadius: 8, backgroundColor: '#eee',
+  },
+  similarPrice: {
+    fontSize: 10, color: '#333', marginTop: 4, fontWeight: '500',
+  },
   wishlistBtn: {
     marginRight: 8,
     marginTop: 4,
