@@ -30,7 +30,7 @@ type PollPhase = 'polling' | 'timeout' | 'failed';
  * - Cleaned up on screen unmount AND on app-state transition to background.
  */
 export default function AnalyzingScreen({ route, navigation }: Props) {
-  const { roomId } = route.params;
+  const { roomId, photoUri } = route.params;
   const [phase, setPhase] = useState<PollPhase>('polling');
   const [attempt, setAttempt] = useState<number>(0);
 
@@ -63,6 +63,7 @@ export default function AnalyzingScreen({ route, navigation }: Props) {
               roomId,
               aiDetectedStyle:      state.style,
               aiDetectedConfidence: state.styleConfidence,
+              photoUri,
             });
             return;
           }

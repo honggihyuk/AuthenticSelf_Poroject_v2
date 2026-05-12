@@ -105,7 +105,7 @@ export APP_STORAGE_LOCAL_ROOT="./var/object-storage"
 
 ### 5-3. Mobile — `src/mobile/app.json`
 
-`extra.apiBaseUrl` 값이 백엔드 주소입니다. 기본 `http://localhost:8080` 로 설정되어 있으며 실기기 테스트 시에는 PC 의 LAN IP(예: `http://192.168.0.10:8080`)로 바꿔야 합니다.
+`extra.apiBaseUrl` 값이 백엔드 주소입니다. 기본 `http://localhost:18080` 로 설정되어 있으며 실기기 테스트 시에는 PC 의 LAN IP(예: `http://192.168.0.10:18080`)로 바꿔야 합니다. (기본 8080 포트는 Windows + WSL/Hyper-V 환경에서 호스트 네트워킹 서비스가 점유하는 경우가 있어 18080으로 변경.)
 
 ---
 
@@ -135,13 +135,13 @@ curl http://localhost:8001/health
 ```bash
 cd src/backend
 # 위 5-1 환경변수가 export 된 상태여야 함
-./gradlew bootRun                    # Windows: gradlew.bat bootRun
+./gradlew bootRun --args="--server.port=18080"     # Windows: gradlew.bat bootRun --args="--server.port=18080"
 ```
 
 기동 후 헬스체크:
 
 ```bash
-curl http://localhost:8080/actuator/health  # 또는 정의된 헬스 엔드포인트
+curl http://localhost:18080/actuator/health  # 또는 정의된 헬스 엔드포인트
 ```
 
 ### 6-3. Mobile 실행

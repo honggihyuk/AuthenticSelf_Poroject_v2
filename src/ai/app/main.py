@@ -37,6 +37,7 @@ from app.errors import (
     ImageNotFoundError,
     ImageReadError,
 )
+from app.routes.objects import router as objects_router
 from app.routes.recommend import router as recommend_router
 from app.routes.style import router as style_router
 from app.schemas import (
@@ -121,6 +122,9 @@ app.include_router(style_router)
 
 # Task-5 router — `POST /recommend/furniture` (UC-01-recommendation FR-1, AC-1).
 app.include_router(recommend_router)
+
+# YOLO object-detection router — `POST /analyze/objects`.
+app.include_router(objects_router)
 
 
 # ---------------------------------------------------------------------------

@@ -184,7 +184,31 @@
       "Bash(rm -rf /c/Users/82104/AppData/Local/Temp/metro-* /c/Users/82104/AppData/Local/Temp/haste-*)",
       "Read(//c/Users/82104/AppData/Local/Temp/**)",
       "PowerShell(docker exec as-mysql *)",
-      "Bash(AI_PHOTO_ROOT='C:/Users/82104/Documents/GitHub/AuthenticSelf_Poroject_v2/src/backend/var/object-storage' .venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001)"
+      "Bash(AI_PHOTO_ROOT='C:/Users/82104/Documents/GitHub/AuthenticSelf_Poroject_v2/src/backend/var/object-storage' .venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001)",
+      "PowerShell($env:DB_URL=\"jdbc:mysql://localhost:3306/authenticself?useSSL=false&serverTimezone=UTC&characterEncoding=utf8mb4\"; $env:DB_USER=\"root\"; $env:DB_PASSWORD=\"password\"; Set-Location \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\backend\"; .\\\\gradlew.bat bootRun --no-daemon)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(& \"C:\\\\Program Files\\\\MySQL\\\\MySQL Server 8.0\\\\bin\\\\mysql.exe\" -uroot -ppassword -e \"SHOW DATABASES;\" 2>&1 | Select-Object -First 20)",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\82104\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-82104-Documents-GitHub-AuthenticSelf-Poroject-v2\\\\98f7de74-c444-461e-afc9-8c332139b08e\\\\tasks\\\\bulkaa2up.output\" -Raw; Write-Output \"---\"; Write-Output \"File size: $\\(\\(Get-Item 'C:\\\\Users\\\\82104\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-82104-Documents-GitHub-AuthenticSelf-Poroject-v2\\\\98f7de74-c444-461e-afc9-8c332139b08e\\\\tasks\\\\bulkaa2up.output'\\).Length\\) bytes\")",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\mobile\"; $env:CI=\"1\"; & \".\\\\node_modules\\\\.bin\\\\expo\" start --port 8082 2>&1)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\mobile\\\\node_modules\\\\expo\\\\bin\" -ErrorAction SilentlyContinue | Format-Table Name -AutoSize; Write-Output \"---\"; \\(Get-Content \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\mobile\\\\node_modules\\\\expo\\\\package.json\" -Raw | ConvertFrom-Json\\).bin)",
+      "PowerShell(& \"C:\\\\Program Files\\\\MySQL\\\\MySQL Server 8.0\\\\bin\\\\mysql.exe\" -uroot -prootroot -e \"SHOW DATABASES LIKE 'authentic_db';\" 2>&1)",
+      "PowerShell($env:DB_URL=\"jdbc:mysql://localhost:3306/authentic_db?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8\"; $env:DB_USER=\"root\"; $env:DB_PASSWORD=\"rootroot\"; Set-Location \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\backend\"; .\\\\gradlew.bat bootRun --no-daemon)",
+      "PowerShell($content = Get-Content \"C:\\\\Users\\\\82104\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-82104-Documents-GitHub-AuthenticSelf-Poroject-v2\\\\98f7de74-c444-461e-afc9-8c332139b08e\\\\tasks\\\\bvbd5dmfl.output\" -Raw; $lines = $content -split \"`n\"; Write-Output \"Total lines: $\\($lines.Count\\)\"; Write-Output \"=== Last 80 lines ===\"; $lines | Select-Object -Last 80)",
+      "PowerShell($env:DB_URL=\"jdbc:mysql://localhost:3306/authentic_db?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8\"; $env:DB_USER=\"root\"; $env:DB_PASSWORD=\"rootroot\"; $env:SERVER_PORT=\"8090\"; Set-Location \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\backend\"; .\\\\gradlew.bat bootRun --no-daemon --args=\"--server.port=8090\")",
+      "PowerShell($content = Get-Content \"C:\\\\Users\\\\82104\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-82104-Documents-GitHub-AuthenticSelf-Poroject-v2\\\\98f7de74-c444-461e-afc9-8c332139b08e\\\\tasks\\\\boly3wd5i.output\" -Raw; $lines = $content -split \"`n\"; Write-Output \"Total lines: $\\($lines.Count\\)\"; Write-Output \"=== Last 100 lines ===\"; $lines | Select-Object -Last 100)",
+      "PowerShell(netsh int *)",
+      "PowerShell($env:DB_URL=\"jdbc:mysql://localhost:3306/authentic_db?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8\"; $env:DB_USER=\"root\"; $env:DB_PASSWORD=\"rootroot\"; Set-Location \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\backend\"; .\\\\gradlew.bat bootRun --no-daemon --args=\"--server.port=18080\")",
+      "PowerShell(& \"C:\\\\Program Files\\\\MySQL\\\\MySQL Server 8.0\\\\bin\\\\mysql.exe\" -uroot -prootroot authentic_db -e \"SELECT user_id, role FROM users;\" 2>&1 | Select-Object -First 20)",
+      "PowerShell(Get-Content *)",
+      "Bash(curl *)",
+      "PowerShell($env:AI_PHOTO_ROOT=\"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\backend\\\\var\\\\object-storage\"; Set-Location \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\ai\"; & \".\\\\.venv\\\\Scripts\\\\python.exe\" -m uvicorn app.main:app --port 8001 --host 0.0.0.0)",
+      "Bash(/c/Users/82104/Documents/GitHub/AuthenticSelf_Poroject_v2/src/ai/.venv/Scripts/python.exe *)",
+      "Bash(./.venv/Scripts/python.exe -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu torch torchvision)",
+      "Bash(./.venv/Scripts/python.exe -m pip install --quiet ultralytics timm)",
+      "Bash(./.venv/Scripts/python.exe -c \"import torch, ultralytics, timm; print\\('torch', torch.__version__, 'ultralytics', ultralytics.__version__, 'timm', timm.__version__\\)\")",
+      "PowerShell(Get-Item *)",
+      "PowerShell($env:AI_PHOTO_ROOT=\"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\backend\\\\var\\\\object-storage\"; Set-Location \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\ai\"; & \".\\\\.venv\\\\Scripts\\\\python.exe\" -m uvicorn app.main:app --port 8001 --host 0.0.0.0 2>&1)",
+      "Bash(./node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

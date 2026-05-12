@@ -1,8 +1,10 @@
 package com.authenticself.space;
 
+import com.authenticself.ai.ObjectsAnalysisClient;
 import com.authenticself.ai.RecommendationOrchestrator;
 import com.authenticself.ai.SpaceAnalysisPersistence;
 import com.authenticself.ai.StyleConfidenceCache;
+import com.authenticself.ai.dto.ObjectsAnalysisResponse;
 import com.authenticself.controller.dto.RecommendationsApiResponse;
 import com.authenticself.controller.dto.SetPreferredStyleRequest;
 import com.authenticself.controller.dto.SpaceResponse;
@@ -48,15 +50,18 @@ public class SpaceController {
 
     private final SpaceAnalysisPersistence persistence;
     private final RecommendationOrchestrator recommendationOrchestrator;
+    private final ObjectsAnalysisClient objectsClient;
     private final int defaultTopN;
 
     public SpaceController(
             SpaceAnalysisPersistence persistence,
             RecommendationOrchestrator recommendationOrchestrator,
+            ObjectsAnalysisClient objectsClient,
             @Value("${app.recommendation.default-top-n:3}") int defaultTopN
     ) {
         this.persistence = persistence;
         this.recommendationOrchestrator = recommendationOrchestrator;
+        this.objectsClient = objectsClient;
         this.defaultTopN = defaultTopN;
     }
 
@@ -131,6 +136,21 @@ public class SpaceController {
         RecommendationsApiResponse body = RecommendationsApiResponse.from(
                 result.response(), result.preferredStyle(), result.cacheHit());
         return ResponseEntity.ok(body);
+    }
+
+    // -----------------------------------------------------------------
+    // GET — YOLO object detection (thin proxy to AI /analyze/objects)
+    // -----------------------------------------------------------------
+    @GetMapping("/{roomId}/objects")
+    public ResponseEntity<ObjectsAnalysisResponse> getRoomObjects(
+            @PathVariable("roomId") String roomId,
+            @RequestHeader(value = "X-User-Id", required = false) String userId
+    ) {
+        requireUserId(userId);
+        Space space = loadAndAuthorize(roomId, userId);
+        ObjectsAnalysisResponse resp =
+                objectsClient.callObjectsAnalysis(roomId, space.getPhotoUrl());
+        return ResponseEntity.ok(resp);
     }
 
     // -----------------------------------------------------------------

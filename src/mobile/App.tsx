@@ -10,18 +10,21 @@ import StyleSelectionScreen from './src/screens/StyleSelectionScreen';
 import RecommendationScreen from './src/screens/RecommendationScreen';
 import WishlistScreen from './src/screens/WishlistScreen';
 import ARPlacementScreen from './src/screens/ARPlacementScreen';
+import ObjectsScreen from './src/screens/ObjectsScreen';
 import type { RecommendationItem } from './src/api/spaces';
 import type { PreferredStyle, Style } from './src/types/style';
 
 export type RootStackParamList = {
   Home: undefined;
   Upload: undefined;
-  Analyzing: { roomId: string };
+  Analyzing: { roomId: string; photoUri?: string };
   StyleSelection: {
     roomId: string;
     aiDetectedStyle: Style | null;
     aiDetectedConfidence: number | null;
+    photoUri?: string;
   };
+  Objects: { roomId: string; photoUri?: string };
   // UC-01-recommendation FR-24 — `preferredStyle` is optional so the
   // existing Task-4 nav call (`replace('Recommendation', { roomId })`)
   // remains legal. When absent, the screen reads the echoed
@@ -49,6 +52,7 @@ export default function App() {
         <Stack.Screen name="Recommendation" component={RecommendationScreen} options={{ title: '가구 추천' }} />
         <Stack.Screen name="Wishlist"       component={WishlistScreen}       options={{ title: '내 위시리스트' }} />
         <Stack.Screen name="ARPlacement"    component={ARPlacementScreen}    options={{ title: 'AR 배치' }} />
+        <Stack.Screen name="Objects"        component={ObjectsScreen}        options={{ title: '객체 검출' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

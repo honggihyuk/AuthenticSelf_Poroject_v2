@@ -1,77 +1,135 @@
-"""``DimensionsEstimator`` — PLACEHOLDER implementation (FR-5).
+"""``DimensionsEstimator`` — YOLO + MiDaS based room dimension estimate.
 
-TODO(ml): replace with real LayoutNet / YOLO-based inference in a future
-task. This placeholder does NOT import any ML runtime framework and does
-NOT load any model weights (AC-2).
+Single-image absolute metric depth is ill-posed. We make it tractable by
+combining two sources:
 
-Deterministic mapping
----------------------
-Hash the image bytes (SHA-256) and use two byte-slices of the digest to
-pick values inside bounded ranges:
+1. **YOLOv8 (COCO)** finds a reference object of a *typical* known real-world
+   width (couch ≈ 2.0 m, bed ≈ 1.5 m, chair ≈ 0.5 m, …). From its pixel
+   bounding-box width we derive a meters-per-pixel scale **at that object's
+   depth plane**.
 
-* ``widthM``  = 2.5 + (digest[0:4]  as uint32) / 2**32 * 3.5   → [2.5, 6.0)
-* ``lengthM`` = 2.5 + (digest[4:8]  as uint32) / 2**32 * 3.5   → [2.5, 6.0)
-* ``heightM`` = 2.4  (fixed — typical residential ceiling)
-* ``confidence`` = 0.60 + (digest[8:12] as uint32) / 2**32 * 0.35 → [0.60, 0.95)
+2. **MiDaS** gives a relative inverse-depth map. The ratio between the
+   reference object's depth and the room's far depth approximates how much
+   farther the back wall is than the reference, so we can estimate length.
 
-Values are rounded to 2 dp. Identical input bytes always produce identical
-output — required for AC-5 (determinism).
+Outputs:
+  - ``widthM``  ≈ pixel image width * meters-per-pixel-at-reference
+  - ``lengthM`` ≈ widthM * (far_depth / reference_depth)
+  - ``heightM`` = 2.4 (standard residential ceiling assumption; one image cannot
+    recover this without a vertical reference)
+  - ``confidence`` ∈ {0.55, 0.25} depending on whether a reference object was
+    found.
+
+The result is a *rough* estimate, not a survey. Documented as a heuristic.
 """
 
 from __future__ import annotations
 
-import hashlib
+import logging
 from pathlib import Path
+from typing import Optional, Tuple
+
+import numpy as np
 
 from app.errors import ImageNotFoundError, ImageReadError
 from .base import SpaceAnalysisResult
+from .depth import DepthEstimator, default_depth_estimator
+from .yolo_detector import Detection, YOLODetector, default_yolo_detector
 
+log = logging.getLogger("dimensions-estimator")
 
 _FIXED_HEIGHT_M = 2.4
-_UINT32_MAX = float(1 << 32)
+
+TYPICAL_WIDTHS_M = {
+    "couch": 2.0,
+    "bed": 1.5,
+    "dining table": 1.5,
+    "chair": 0.5,
+    "tv": 1.0,
+    "refrigerator": 0.7,
+    "person": 0.45,
+    "potted plant": 0.3,
+    "laptop": 0.35,
+    "toilet": 0.4,
+    "oven": 0.6,
+    "microwave": 0.5,
+    "sink": 0.6,
+    "book": 0.15,
+}
+
+
+def _pick_reference(detections) -> Optional[Detection]:
+    """Pick the highest-confidence detection whose label has a typical width."""
+    candidates = [d for d in detections if d.label in TYPICAL_WIDTHS_M]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda d: d.confidence)
+
+
+def _bbox_depth_median(depth_map: np.ndarray, bbox: Tuple[float, float, float, float]) -> float:
+    """Return the median inverse-depth value inside the bbox (clamped to image)."""
+    h, w = depth_map.shape[:2]
+    x1, y1, x2, y2 = bbox
+    x1 = max(0, int(round(x1)))
+    y1 = max(0, int(round(y1)))
+    x2 = min(w, int(round(x2)))
+    y2 = min(h, int(round(y2)))
+    if x2 <= x1 or y2 <= y1:
+        return float(np.median(depth_map))
+    return float(np.median(depth_map[y1:y2, x1:x2]))
 
 
 class DimensionsEstimator:
-    """PLACEHOLDER dimensions analyzer — deterministic hash-driven stub (FR-5).
+    """YOLO + MiDaS based dimension estimator (heuristic, single-image)."""
 
-    TODO(ml): swap for real LayoutNet/YOLO inference in a future task.
-    """
+    def __init__(
+        self,
+        yolo: Optional[YOLODetector] = None,
+        depth: Optional[DepthEstimator] = None,
+    ) -> None:
+        self._yolo = yolo or default_yolo_detector()
+        self._depth = depth or default_depth_estimator()
 
-    def analyze(self, image_path: Path) -> SpaceAnalysisResult:  # noqa: D401
-        """Return deterministic pseudo-dimensions from the SHA-256 of the file."""
+    def analyze(self, image_path: Path) -> SpaceAnalysisResult:
         if not image_path.exists() or not image_path.is_file():
-            raise ImageNotFoundError(
-                f"Resolved path does not exist: {image_path.name}"
+            raise ImageNotFoundError(f"Resolved path does not exist: {image_path.name}")
+
+        det = self._yolo.detect(image_path)
+        dep = self._depth.estimate(image_path)
+        img_w, img_h = dep.image_width, dep.image_height
+        depth_map = dep.depth_map
+
+        ref = _pick_reference(det.detections)
+
+        if ref is None:
+            width_m = 3.5
+            length_m = 3.5
+            confidence = 0.25
+            log.info("no reference object found; using fallback dimensions")
+        else:
+            real_w = TYPICAL_WIDTHS_M[ref.label]
+            px_w = max(1.0, ref.bbox[2] - ref.bbox[0])
+            mpp_at_ref = real_w / px_w
+
+            width_m = img_w * mpp_at_ref
+            ref_depth_inv = max(_bbox_depth_median(depth_map, ref.bbox), 1e-3)
+            far_depth_inv = max(float(depth_map.min()), 1e-3)
+            depth_ratio = ref_depth_inv / far_depth_inv
+
+            length_m = width_m * float(np.clip(depth_ratio, 0.6, 2.0))
+
+            width_m = float(np.clip(width_m, 1.5, 12.0))
+            length_m = float(np.clip(length_m, 1.5, 12.0))
+            confidence = round(min(0.85, 0.45 + 0.4 * ref.confidence), 2)
+
+            log.info(
+                "ref=%s conf=%.2f real_w=%.2fm px_w=%.0f mpp=%.4f -> width=%.2fm length=%.2fm",
+                ref.label, ref.confidence, real_w, px_w, mpp_at_ref, width_m, length_m,
             )
 
-        try:
-            raw = image_path.read_bytes()
-        except OSError as e:
-            raise ImageReadError(
-                f"Could not read file bytes: {image_path.name}"
-            ) from e
-
-        if not raw:
-            raise ImageReadError(f"File is empty: {image_path.name}")
-
-        digest = hashlib.sha256(raw).digest()
-
-        def _u32(offset: int) -> int:
-            return int.from_bytes(digest[offset : offset + 4], "big", signed=False)
-
-        width_m = 2.5 + (_u32(0) / _UINT32_MAX) * 3.5
-        length_m = 2.5 + (_u32(4) / _UINT32_MAX) * 3.5
-        confidence = 0.60 + (_u32(8) / _UINT32_MAX) * 0.35
-
-        # Round to one decimal place for width/length for nicer UX and to
-        # ensure the AC-16 regex matches (^\d+(\.\d+)?x...).
-        width_m = round(width_m, 1)
-        length_m = round(length_m, 1)
-        confidence = round(confidence, 2)
-
         return SpaceAnalysisResult(
-            widthM=width_m,
-            lengthM=length_m,
+            widthM=round(width_m, 2),
+            lengthM=round(length_m, 2),
             heightM=_FIXED_HEIGHT_M,
-            confidence=confidence,
+            confidence=round(confidence, 2),
         )

@@ -1,43 +1,41 @@
-"""``StyleClassifier`` — deterministic placeholder (FR-3, FR-4, AC-8).
+"""``StyleClassifier`` — HSV-histogram heuristic (simplified style rule).
 
-This class deterministically classifies a room photo into one of five
-interior-design styles, based on the SHA-256 digest of the image bytes.
-It is **intentionally not a real ML model**; it exists so that UC-01
-(style-selection) can wire a fully-typed response end-to-end without
-pulling heavy ML frameworks into the runtime-deps set.
+Single-image style detection without a trained classifier. We compute three
+features from the image and apply five linear rules that bias each style
+score. The five output labels match the Spring ``Style`` enum exactly
+(``CURRENT`` is user-only and is never emitted here).
 
-TODO(ml): replace with a real style classifier (e.g. ResNet/CLIP-based
-transformer) in a future task. The hash-based stub below preserves
-deterministic I/O — identical bytes yield identical scores — so the
-Spring + RN side contracts can be locked in before the real model lands.
+Features:
+  - ``mean_v``    — average HSV brightness (0..1)
+  - ``mean_s``    — average HSV saturation (0..1)
+  - ``warm_ratio`` — fraction of pixels with warm hue (red/orange/yellow) AND
+                    non-trivial saturation
 
-Hash-to-score mapping (documented per FR-4):
+Rules (additive, all start from a small base):
+  - SCANDINAVIAN: bright + low saturation (whites/pale-grey rooms)
+  - INDUSTRIAL:   dark + low saturation (concrete/black-metal looks)
+  - CLASSIC:      warm-toned pixels (wood/gold/brown)
+  - MODERN:       high saturation contrast on a mid-bright base
+  - SIMPLE:       neutral mid V, low saturation (the default "anything else")
 
-1. Read image bytes and compute ``sha256(bytes)`` (32-byte digest).
-2. Take the first 20 hex characters of that digest.
-3. Split them into five 4-char chunks; each chunk parses as a 16-bit int
-   in [0, 65535].
-4. Divide by 65535.0 to produce five raw floats in [0, 1].
-5. Normalise them to sum exactly to 1.0 (re-normalise after rounding so
-   the tolerance in FR-2's score-sum check stays satisfied).
-6. ``argmax`` of the normalised vector is the returned style.
-
-``CURRENT`` is a user-only choice (PreferredStyle) and is never emitted
-here — the enum below has exactly the five AI-output labels (AC-4).
+Outputs sum to ~1.0 (FR-2 tolerance). ``argmax`` is the predicted style.
 """
 
 from __future__ import annotations
 
-import hashlib
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Tuple
 
+import cv2
+import numpy as np
+
 from app.errors import ImageNotFoundError, ImageReadError
 
+log = logging.getLogger("style-classifier")
 
-# Canonical AI-output labels — exactly the five values the Spring `Style`
-# enum expects. `CURRENT` is deliberately absent (FR-8 / AC-10 / AC-4).
+
 STYLE_LABELS: Tuple[str, ...] = (
     "MODERN",
     "SIMPLE",
@@ -49,86 +47,87 @@ STYLE_LABELS: Tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class StyleAnalysisResult:
-    """Structured output returned by :class:`StyleClassifier`.
-
-    ``scores`` keys are exactly :data:`STYLE_LABELS`. ``style`` is the
-    argmax; ``confidence`` equals ``scores[style]`` rounded to 2dp.
-    """
-
     style: str
     confidence: float
     scores: Dict[str, float]
 
 
+def _features(img_bgr: np.ndarray) -> Tuple[float, float, float]:
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    h = hsv[:, :, 0].astype(np.float32)
+    s = hsv[:, :, 1].astype(np.float32) / 255.0
+    v = hsv[:, :, 2].astype(np.float32) / 255.0
+
+    mean_s = float(s.mean())
+    mean_v = float(v.mean())
+
+    warm_mask = ((h < 25) | (h > 160)) & (s > 0.18)
+    warm_ratio = float(warm_mask.mean())
+
+    return mean_v, mean_s, warm_ratio
+
+
+def _normalise(scores: Dict[str, float]) -> Dict[str, float]:
+    total = sum(scores.values())
+    if total <= 0.0:
+        return {k: round(1.0 / len(scores), 2) for k in scores}
+    normalised = {k: v / total for k, v in scores.items()}
+    rounded = {k: round(v, 2) for k, v in normalised.items()}
+    s = round(sum(rounded.values()), 2)
+    if s != 1.00:
+        delta = round(1.00 - s, 2)
+        argmax = max(rounded, key=rounded.get)
+        rounded[argmax] = round(rounded[argmax] + delta, 2)
+    return rounded
+
+
 class StyleClassifier:
-    """PLACEHOLDER style analyzer — hash-based, deterministic (FR-3, FR-4).
+    """HSV-histogram heuristic style classifier (FR-3, FR-4)."""
 
-    TODO(ml): swap for a real classifier (ResNet / CLIP / transformer) in
-    a future task. No mutable state is carried across calls, so the class
-    is trivially thread-safe and can be invoked concurrently from
-    ``asyncio.to_thread``.
-    """
-
-    # Exposed for Task 4 test parity — downstream callers grab the list
-    # via ``StyleClassifier.LABELS`` rather than reaching into module globals.
     LABELS: Tuple[str, ...] = STYLE_LABELS
 
     def analyze(self, image_path: Path) -> StyleAnalysisResult:
-        """Return a deterministic style classification for the image at ``image_path``.
-
-        Raises:
-            ImageNotFoundError: if the path does not exist / is not a file.
-            ImageReadError: if the file is empty or unreadable.
-        """
         if not image_path.exists() or not image_path.is_file():
-            raise ImageNotFoundError(
-                f"Resolved path does not exist: {image_path.name}"
-            )
-        try:
-            raw = image_path.read_bytes()
-        except OSError as e:
-            raise ImageReadError(
-                f"Could not read file bytes: {image_path.name}"
-            ) from e
+            raise ImageNotFoundError(f"Resolved path does not exist: {image_path.name}")
 
-        if not raw:
+        buf = np.fromfile(str(image_path), dtype=np.uint8)
+        if buf.size == 0:
             raise ImageReadError(f"File is empty: {image_path.name}")
+        img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        if img is None:
+            raise ImageReadError(f"cv2.imdecode failed: {image_path.name}")
 
-        # ---- hash → five raw floats (FR-4) -------------------------------
-        digest_hex = hashlib.sha256(raw).hexdigest()[:20]  # 20 hex chars -> 5 chunks of 4
-        chunks = [digest_hex[i : i + 4] for i in range(0, 20, 4)]
-        raw_vals = [int(c, 16) / 65535.0 for c in chunks]  # each in [0,1]
+        h, w = img.shape[:2]
+        long_edge = max(h, w)
+        if long_edge > 320:
+            scale = 320.0 / long_edge
+            img = cv2.resize(
+                img, (max(1, int(w * scale)), max(1, int(h * scale))),
+                interpolation=cv2.INTER_AREA,
+            )
 
-        # Ensure no all-zero vector (extremely unlikely given sha256, but defensive).
-        total_raw = sum(raw_vals)
-        if total_raw <= 0.0:
-            raw_vals = [1.0] * len(STYLE_LABELS)
-            total_raw = float(len(STYLE_LABELS))
+        mean_v, mean_s, warm_ratio = _features(img)
 
-        # ---- normalise, round to 2 dp, re-normalise to tolerance band ----
-        normalised = [v / total_raw for v in raw_vals]
-        rounded = [round(v, 2) for v in normalised]
+        scores: Dict[str, float] = {label: 0.10 for label in STYLE_LABELS}
 
-        # After 2-dp rounding the sum may drift; nudge the argmax so the
-        # sum is in [0.99, 1.01] (FR-2).
-        s = round(sum(rounded), 2)
-        if s != 1.00:
-            delta = round(1.00 - s, 2)
-            # Apply the correction to the currently-largest value so the
-            # argmax is preserved.
-            idx_max = rounded.index(max(rounded))
-            rounded[idx_max] = round(rounded[idx_max] + delta, 2)
+        if mean_v > 0.72 and mean_s < 0.22:
+            scores["SCANDINAVIAN"] += 0.65
+        if mean_v < 0.42 and mean_s < 0.30:
+            scores["INDUSTRIAL"] += 0.60
+        if warm_ratio > 0.30 and mean_s > 0.22:
+            scores["CLASSIC"] += 0.55
+        if mean_s > 0.38 and 0.45 <= mean_v <= 0.80:
+            scores["MODERN"] += 0.50
+        if mean_s < 0.30 and 0.42 <= mean_v <= 0.72 and warm_ratio < 0.30:
+            scores["SIMPLE"] += 0.45
 
-        scores: Dict[str, float] = {
-            label: score for label, score in zip(STYLE_LABELS, rounded)
-        }
+        rounded = _normalise(scores)
+        style = max(rounded, key=rounded.get)
+        confidence = round(rounded[style], 2)
 
-        # ---- pick the argmax ---------------------------------------------
-        style = max(scores, key=lambda k: scores[k])
-        confidence = round(scores[style], 2)
-
-        return StyleAnalysisResult(
-            style=style,
-            confidence=confidence,
-            scores=scores,
+        log.info(
+            "style=%s conf=%.2f v=%.2f s=%.2f warm=%.2f",
+            style, confidence, mean_v, mean_s, warm_ratio,
         )
+
+        return StyleAnalysisResult(style=style, confidence=confidence, scores=rounded)

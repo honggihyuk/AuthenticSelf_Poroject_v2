@@ -29,7 +29,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'StyleSelection'>;
  *   `Recommendation` on success (AC-30).
  */
 export default function StyleSelectionScreen({ route, navigation }: Props) {
-  const { roomId, aiDetectedStyle, aiDetectedConfidence } = route.params;
+  const { roomId, aiDetectedStyle, aiDetectedConfidence, photoUri } = route.params;
 
   // Pre-select: AI-detected style if present, otherwise CURRENT.
   const initialSelection: PreferredStyle = useMemo(() => {
@@ -125,6 +125,14 @@ export default function StyleSelectionScreen({ route, navigation }: Props) {
       )}
 
       <Pressable
+        testID="btn-objects"
+        style={styles.secondaryBtn}
+        onPress={() => navigation.navigate('Objects', { roomId, photoUri })}
+      >
+        <Text style={styles.secondaryBtnLabel}>객체 검출 보기</Text>
+      </Pressable>
+
+      <Pressable
         testID="btn-next"
         disabled={submitting}
         style={[styles.submit, submitting && { opacity: 0.6 }]}
@@ -164,4 +172,9 @@ const styles = StyleSheet.create({
   },
   submitLabel: { color: 'white', fontSize: 16, fontWeight: '600' },
   errorText:   { color: '#c22', marginTop: 12, fontSize: 13 },
+  secondaryBtn: {
+    marginTop: 16, paddingVertical: 12, borderRadius: 10,
+    borderWidth: 1, borderColor: '#1f6feb', alignItems: 'center',
+  },
+  secondaryBtnLabel: { color: '#1f6feb', fontSize: 15, fontWeight: '600' },
 });

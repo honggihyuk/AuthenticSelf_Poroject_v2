@@ -7,7 +7,7 @@ schema field-for-field.
 
 from __future__ import annotations
 
-from typing import Dict, Literal, Optional
+from typing import Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -131,6 +131,43 @@ class StyleAnalysisResponse(BaseModel):
     style: StyleLabel
     confidence: float = Field(..., ge=0.0, le=1.0)
     scores: Dict[StyleLabel, float]
+    processingMs: int = Field(..., ge=0)
+
+
+# ---------------------------------------------------------------------------
+# Object-detection (YOLO) request/response — POST /analyze/objects
+# ---------------------------------------------------------------------------
+
+
+class ObjectsAnalyzeRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    roomId: str = Field(
+        ..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    photoUrl: str = Field(
+        ..., min_length=8, max_length=2048, pattern=r"^file://.+",
+    )
+
+
+class DetectedObject(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    bbox: Tuple[float, float, float, float] = Field(
+        ..., description="(x1, y1, x2, y2) absolute pixel coords",
+    )
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+class ObjectsAnalysisResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    roomId: str
+    status: str = Field(..., pattern=r"^OK$")
+    imageWidth: int = Field(..., ge=1)
+    imageHeight: int = Field(..., ge=1)
+    objects: List[DetectedObject]
     processingMs: int = Field(..., ge=0)
 
 

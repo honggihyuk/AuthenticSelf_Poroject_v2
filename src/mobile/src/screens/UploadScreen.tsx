@@ -57,7 +57,7 @@ export default function UploadScreen({ navigation }: Props) {
         mimeType:  asset.mimeType,
         onProgress: (p) => setProgress(p),
       });
-      navigation.replace('Analyzing', { roomId: result.roomId });
+      navigation.replace('Analyzing', { roomId: result.roomId, photoUri: asset.uri });
     } catch (err) {
       const code = err instanceof UploadFailedError ? err.body?.errorCode : undefined;
       Alert.alert(
