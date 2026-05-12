@@ -37,6 +37,10 @@ export type RecommendationItem = {
   type: FurnitureType;
   price: number;
   imageUrl: string | null;
+  /** Phase A — curated 3D model URL for AR placement. Null when no GLB is
+   *  associated with this furniture row; the AR screen falls back to the
+   *  per-type placeholder in that case. */
+  modelUrl?: string | null;
   fitScore: number;
   scoreBreakdown: ScoreBreakdown;
   rationale: string;

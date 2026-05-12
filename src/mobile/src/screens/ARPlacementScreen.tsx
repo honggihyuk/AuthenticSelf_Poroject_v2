@@ -171,7 +171,16 @@ export default function ARPlacementScreen({ route, navigation }: Props) {
   const loadPayload = useMemo(() => {
     const type = item.type;
     const dimensions = DEFAULT_DIMENSIONS_BY_TYPE[type] ?? null;
-    const modelUrl = MODEL_URL_BY_TYPE[type];
+    // Phase A — prefer the per-row curated `modelUrl` (V8 migration); fall
+    // back to the per-type bundled GLB placeholder when the catalog row has
+    // no 3D asset assigned yet. Relative URLs (e.g. "/static/furniture/...")
+    // are resolved against `settings.apiBaseUrl`.
+    const itemModelUrl = item.modelUrl ?? null;
+    const modelUrl = itemModelUrl
+      ? (itemModelUrl.startsWith('http') || itemModelUrl.startsWith('asset:')
+          ? itemModelUrl
+          : `${settings.apiBaseUrl}${itemModelUrl}`)
+      : MODEL_URL_BY_TYPE[type];
     return encodeInbound({
       bridgeVersion: AR_BRIDGE_VERSION,
       event: 'load',

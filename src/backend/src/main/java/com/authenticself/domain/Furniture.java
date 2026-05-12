@@ -49,6 +49,10 @@ public class Furniture {
     @Column(name = "image_url", length = 512)
     private String imageUrl;
 
+    /** Phase A — curated 3D model asset for AR placement. Nullable. (V8) */
+    @Column(name = "model_url", length = 512)
+    private String modelUrl;
+
     @Column(name = "color_hex", nullable = false, length = 7)
     private String colorHex;
 
@@ -85,6 +89,9 @@ public class Furniture {
 
     public String getImageUrl()           { return imageUrl; }
     public void   setImageUrl(String v)   { this.imageUrl = v; }
+
+    public String getModelUrl()           { return modelUrl; }
+    public void   setModelUrl(String v)   { this.modelUrl = v; }
 
     public String getColorHex()           { return colorHex; }
     public void   setColorHex(String v)   { this.colorHex = v; }

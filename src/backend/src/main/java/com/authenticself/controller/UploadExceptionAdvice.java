@@ -11,6 +11,7 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.UUID;
 
@@ -62,6 +63,21 @@ public class UploadExceptionAdvice {
                 code, corr, ex.getHeaderName());
         return ResponseEntity.status(code.httpStatus())
                 .body(new ErrorResponse(code.name(), code.defaultMessage(), corr));
+    }
+
+    /**
+     * Static-resource miss (Spring 3.2+) — collapse to a clean 404 so frontends
+     * can distinguish "asset not found" from a real server fault. Before this
+     * handler existed, the catch-all below mapped every NoResourceFoundException
+     * to a STORAGE_PERSIST_FAILED 500, which made debugging Phase A asset
+     * pipeline issues (missing GLB / wrong path) painful.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex) {
+        String corr = UUID.randomUUID().toString();
+        log.info("static 404 path={} correlationId={}", ex.getResourcePath(), corr);
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ErrorResponse("NOT_FOUND", "리소스를 찾을 수 없습니다.", corr));
     }
 
     /** Last-resort catch-all — assigns STORAGE_PERSIST_FAILED per NFR Error-handling. */

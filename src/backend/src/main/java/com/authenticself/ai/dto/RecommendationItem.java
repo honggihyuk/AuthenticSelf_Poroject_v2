@@ -18,8 +18,19 @@ public record RecommendationItem(
         String type,
         Integer price,
         String imageUrl,
+        /** Phase A — curated 3D model URL for AR placement; nullable.
+         *  Filled in by Spring from {@code furniture.model_url} after Python
+         *  returns (Python schema is intentionally unchanged). */
+        String modelUrl,
         Double fitScore,
         ScoreBreakdown scoreBreakdown,
         String rationale
 ) {
+    /** Return a copy with {@code modelUrl} replaced. */
+    public RecommendationItem withModelUrl(String newModelUrl) {
+        return new RecommendationItem(
+                furnitureId, name, type, price, imageUrl, newModelUrl,
+                fitScore, scoreBreakdown, rationale
+        );
+    }
 }

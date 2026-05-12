@@ -80,6 +80,20 @@ function formatKrw(v: number): string {
   return `\u20A9${Number(v).toLocaleString('ko-KR')}`;
 }
 
+/**
+ * Phase A \u2014 backend-served curated images use relative paths like
+ * "/static/furniture/<id>.jpg". `<Image>` needs an absolute URL on every
+ * platform, so prefix with the configured API base URL. Naver/external
+ * URLs (Phase B) already start with "http(s)://" and pass through.
+ */
+function resolveImageUri(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('data:')) {
+    return raw;
+  }
+  return `${settings.apiBaseUrl}${raw.startsWith('/') ? raw : '/' + raw}`;
+}
+
 function sectionEmptyCopy(cat: string): string {
   return `${CATEGORY_LABELS[cat] ?? cat}는 현재 추천할 가구가 없습니다.`;
 }
@@ -329,16 +343,20 @@ function ItemCard({
       style={styles.card}
       testID={`card-${item.furnitureId}`}
     >
-      {imageFailed || item.imageUrl == null ? (
-        <View style={[styles.cardImage, styles.cardImagePlaceholder]} />
-      ) : (
-        <Image
-          source={{ uri: item.imageUrl }}
-          style={styles.cardImage}
-          onError={() => setImageFailed(true)}
-          testID={`card-image-${item.furnitureId}`}
-        />
-      )}
+      {(() => {
+        const uri = resolveImageUri(item.imageUrl);
+        if (imageFailed || uri == null) {
+          return <View style={[styles.cardImage, styles.cardImagePlaceholder]} />;
+        }
+        return (
+          <Image
+            source={{ uri }}
+            style={styles.cardImage}
+            onError={() => setImageFailed(true)}
+            testID={`card-image-${item.furnitureId}`}
+          />
+        );
+      })()}
       <View style={styles.cardBody}>
         <Text style={styles.cardName} numberOfLines={1}>
           {item.name}
@@ -382,6 +400,31 @@ function ItemCard({
           >
             <Text style={styles.arBtnLabel}>AR로 배치</Text>
           </Pressable>
+        </View>
+
+        {/*
+          Phase B anchor — "비슷한 실제 상품 (Naver)" 가로 스크롤 자리.
+          Phase A에서는 placeholder 상태만 노출하여 추후 Naver 검색·CLIP
+          분류 결과 캐시(furniture_similar_cache)가 채워지면 그대로 데이터
+          를 끼우면 됨. 빈 상태 동안 사용자는 "준비 중" 카피만 봄.
+        */}
+        <View testID={`similar-${item.furnitureId}`} style={styles.similarBlock}>
+          <Text style={styles.similarHeading}>비슷한 실제 상품</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.similarRow}
+          >
+            <View style={styles.similarPlaceholder}>
+              <Text style={styles.similarPlaceholderText}>준비 중</Text>
+            </View>
+            <View style={styles.similarPlaceholder}>
+              <Text style={styles.similarPlaceholderText}>준비 중</Text>
+            </View>
+            <View style={styles.similarPlaceholder}>
+              <Text style={styles.similarPlaceholderText}>준비 중</Text>
+            </View>
+          </ScrollView>
         </View>
       </View>
     </View>
@@ -440,6 +483,23 @@ const styles = StyleSheet.create({
     marginTop: 8,
     flexWrap: 'wrap',
   },
+  similarBlock: {
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    paddingTop: 10,
+  },
+  similarHeading: {
+    fontSize: 12, fontWeight: '600', color: '#444', marginBottom: 6,
+  },
+  similarRow: { flexDirection: 'row' },
+  similarPlaceholder: {
+    width: 72, height: 72, marginRight: 8,
+    backgroundColor: '#f4f4f4', borderRadius: 8,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: '#e6e6e6', borderStyle: 'dashed',
+  },
+  similarPlaceholderText: { fontSize: 11, color: '#888' },
   wishlistBtn: {
     marginRight: 8,
     marginTop: 4,

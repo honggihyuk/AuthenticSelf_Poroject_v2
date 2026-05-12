@@ -208,7 +208,19 @@
       "Bash(./.venv/Scripts/python.exe -c \"import torch, ultralytics, timm; print\\('torch', torch.__version__, 'ultralytics', ultralytics.__version__, 'timm', timm.__version__\\)\")",
       "PowerShell(Get-Item *)",
       "PowerShell($env:AI_PHOTO_ROOT=\"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\backend\\\\var\\\\object-storage\"; Set-Location \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\ai\"; & \".\\\\.venv\\\\Scripts\\\\python.exe\" -m uvicorn app.main:app --port 8001 --host 0.0.0.0 2>&1)",
-      "Bash(./node_modules/.bin/tsc --noEmit)"
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(\"/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe\" -uroot -prootroot authentic_db -e \"SELECT COUNT\\(*\\) AS total FROM furniture; SELECT category, COUNT\\(*\\) AS n FROM furniture GROUP BY category; SELECT DISTINCT style FROM furniture;\")",
+      "Bash(\"/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe\" -uroot -prootroot authentic_db -e \"DESCRIBE furniture; SELECT * FROM furniture LIMIT 2 \\\\G\")",
+      "Bash('/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe' -uroot -prootroot authentic_db -e ' *)",
+      "Bash(xargs grep -l Furniture)",
+      "Bash(command -v node)",
+      "Bash(command -v npx)",
+      "Bash(npx --version)",
+      "Bash(command -v gltf-pipeline)",
+      "Bash(chmod +x /c/Users/82104/Documents/GitHub/AuthenticSelf_Poroject_v2/scripts/compress-glb.sh)",
+      "Read(//c/tmp/**)",
+      "Bash(/c/Users/82104/Documents/GitHub/AuthenticSelf_Poroject_v2/scripts/compress-glb.sh /tmp/triangle.glb)",
+      "Bash('/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe' -uroot -prootroot authentic_db --batch -e ' *)"
     ]
   }
 }
