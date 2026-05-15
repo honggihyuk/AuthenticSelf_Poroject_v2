@@ -1,7 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ActivityIndicator, Pressable, StyleSheet, AppState,
+  ActivityIndicator,
+  AppState,
   AppStateStatus,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -13,6 +17,8 @@ import {
   POLL_INITIAL_MS,
   delayForAttempt,
 } from '../api/pollSchedule';
+import { Button } from '../components';
+import { colors, spacing, typography } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Analyzing'>;
 
@@ -123,7 +129,6 @@ export default function AnalyzingScreen({ route, navigation }: Props) {
     startedAtRef.current = Date.now();
     attemptsRef.current  = 0;
     cancelledRef.current = false;
-    // Kick off the cycle again — call getSpace immediately.
     setAttempt((n) => n + 1);
     getSpace({
       baseUrl: settings.apiBaseUrl,
@@ -151,16 +156,21 @@ export default function AnalyzingScreen({ route, navigation }: Props) {
         <Text style={styles.body}>
           분석이 예상보다 오래 걸리고 있습니다. 다시 시도하거나 사진을 다시 업로드해주세요.
         </Text>
-        <Pressable testID="btn-retry" style={styles.primaryBtn} onPress={restart}>
-          <Text style={styles.primaryBtnLabel}>다시 시도</Text>
-        </Pressable>
-        <Pressable
+        <Button
+          testID="btn-retry"
+          label="다시 시도"
+          variant="primary"
+          size="md"
+          onPress={restart}
+        />
+        <View style={styles.gap} />
+        <Button
           testID="btn-reupload"
-          style={styles.secondaryBtn}
+          label="다시 업로드"
+          variant="secondary"
+          size="md"
           onPress={() => navigation.replace('Upload')}
-        >
-          <Text style={styles.secondaryBtnLabel}>다시 업로드</Text>
-        </Pressable>
+        />
       </View>
     );
   }
@@ -172,20 +182,20 @@ export default function AnalyzingScreen({ route, navigation }: Props) {
         <Text style={styles.body}>
           분석에 실패했습니다. 다른 사진으로 다시 시도해주세요.
         </Text>
-        <Pressable
+        <Button
           testID="btn-reupload"
-          style={styles.primaryBtn}
+          label="다시 업로드"
+          variant="primary"
+          size="md"
           onPress={() => navigation.replace('Upload')}
-        >
-          <Text style={styles.primaryBtnLabel}>다시 업로드</Text>
-        </Pressable>
+        />
       </View>
     );
   }
 
   return (
     <View style={styles.container} testID="analyzing-polling">
-      <ActivityIndicator size="large" />
+      <ActivityIndicator size="large" color={colors.primary} />
       <Text style={styles.text}>방을 분석하고 있습니다…</Text>
       <Text testID="room-id" style={styles.roomId}>roomId: {roomId}</Text>
       <Text testID="attempt-count" style={styles.roomId}>시도 {attempt}</Text>
@@ -194,19 +204,22 @@ export default function AnalyzingScreen({ route, navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  text:      { marginTop: 16, fontSize: 16 },
-  roomId:    { marginTop: 8, fontSize: 12, color: '#666' },
-  headline:  { fontSize: 20, fontWeight: '700', marginBottom: 12 },
-  body:      { fontSize: 14, color: '#444', textAlign: 'center', marginBottom: 24 },
-  primaryBtn: {
-    backgroundColor: '#1f6feb', paddingVertical: 12, paddingHorizontal: 24,
-    borderRadius: 10, marginBottom: 12, minWidth: 200, alignItems: 'center',
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+    backgroundColor: colors.background,
   },
-  primaryBtnLabel: { color: 'white', fontSize: 16, fontWeight: '600' },
-  secondaryBtn: {
-    paddingVertical: 12, paddingHorizontal: 24, borderRadius: 10,
-    borderWidth: 1, borderColor: '#1f6feb', minWidth: 200, alignItems: 'center',
+  text: { ...typography.bodyL, marginTop: spacing.md, color: colors.textPrimary },
+  roomId: { ...typography.caption, color: colors.textMuted, marginTop: spacing.xs },
+  headline: { ...typography.displayM, marginBottom: spacing.sm },
+  body: {
+    ...typography.bodyM,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+    maxWidth: 360,
   },
-  secondaryBtnLabel: { color: '#1f6feb', fontSize: 16, fontWeight: '600' },
+  gap: { height: spacing.sm },
 });

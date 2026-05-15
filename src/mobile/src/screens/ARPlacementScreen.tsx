@@ -35,6 +35,8 @@ import {
   View,
 } from 'react-native';
 
+import { colors, radii, spacing, typography } from '../theme';
+
 // react-native-web does not re-export ToastAndroid, so a static import breaks
 // the web bundle. Guarded require keeps the Android path identical while the
 // web path simply leaves the symbol undefined (Platform.OS check below skips it).
@@ -391,29 +393,30 @@ export default function ARPlacementScreen({ route, navigation }: Props) {
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
+  // AR scene stays dark for immersion regardless of app theme.
   container: { flex: 1, backgroundColor: '#111' },
   fallbackContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 32,
-    backgroundColor: '#fff',
+    padding: spacing.xl,
+    backgroundColor: colors.background,
   },
   fallbackText: {
-    fontSize: 15,
-    color: '#222',
+    ...typography.titleM,
+    color: colors.textPrimary,
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: spacing.lg,
   },
   backBtn: {
-    backgroundColor: '#1f6feb',
-    paddingVertical: 12,
-    paddingHorizontal: 28,
-    borderRadius: 10,
-    minHeight: 44,
-    minWidth: 120,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.md,
+    minHeight: 48,
+    minWidth: 160,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backBtnLabel: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  backBtnLabel: { color: colors.onPrimary, fontSize: 15, fontWeight: '600' },
 });

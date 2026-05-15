@@ -1,17 +1,9 @@
 /**
  * WishlistScreen — UC-02-wishlist FR-17 / AC-39..AC-46.
  *
- * Two-tab view over the user's wishlist:
- *   - 보관 중 (Active)   — primary/default tab
- *   - 구매 완료 (Purchased)
- *
- * Each card exposes:
- *   - 구매 완료 (Active) / 보관 중으로 되돌리기 (Purchased): PATCH status
- *   - 삭제: DELETE the item
- * with an Alert.alert confirm prompt + optimistic local update.
- *
- * Loading / error / empty states follow the spec §5 FR-17 copy verbatim
- * so verification can grep for the exact strings.
+ * Two-tab view (보관 중 / 구매 완료) over the user's wishlist. Visual
+ * layer uses the IKEA-style design system; testIDs, copy, alert flow,
+ * and effects are preserved verbatim.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -27,8 +19,6 @@ import {
   View,
 } from 'react-native';
 
-// react-native-web does not re-export ToastAndroid; conditional require keeps
-// the static analyzer happy while preserving Android behaviour.
 const ToastAndroid: typeof import('react-native').ToastAndroid | undefined =
   Platform.OS === 'android'
     ? (require('react-native') as typeof import('react-native')).ToastAndroid
@@ -45,6 +35,8 @@ import {
   updateWishlistState,
   WishlistItem,
 } from '../api/wishlist';
+import { Button, Card } from '../components';
+import { colors, radii, spacing, typography } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Wishlist'>;
 
@@ -70,14 +62,11 @@ function showToast(msg: string): void {
 }
 
 function formatKrw(v: number): string {
-  return `\u20A9${Number(v).toLocaleString('ko-KR')}`;
+  return `₩${Number(v).toLocaleString('ko-KR')}`;
 }
 
 function formatYmd(iso: string | null | undefined): string {
   if (!iso) return '';
-  // Backend emits LocalDateTime strings like "2026-04-18T09:14:22"
-  // (no zone). Slice out the date portion — timezone-safe and avoids
-  // the JS Date parser which may subtract a day in Pacific timezones.
   const m = /^(\d{4}-\d{2}-\d{2})/.exec(iso);
   return m ? m[1] : iso;
 }
@@ -126,9 +115,6 @@ export default function WishlistScreen(_props: Props) {
     return { activeItems: active, purchasedItems: purchased };
   }, [resp]);
 
-  // -----------------------------------------------------------------
-  // Actions
-  // -----------------------------------------------------------------
   const onTogglePurchased = useCallback(
     async (item: WishlistItem) => {
       const target = item.status === 'Active' ? 'PURCHASED' : 'ACTIVE';
@@ -146,7 +132,6 @@ export default function WishlistScreen(_props: Props) {
                 wishlistId: item.wishlistId,
                 status: target,
               });
-              // Optimistic local update — move the item between arrays.
               setResp((prev) => {
                 if (!prev) return prev;
                 const remaining = prev.items.filter((i) => i.wishlistId !== item.wishlistId);
@@ -158,8 +143,6 @@ export default function WishlistScreen(_props: Props) {
                   totalPurchased: next.filter((i) => i.status === 'Purchased').length,
                 };
               });
-              // After marking purchased, jump to the purchased tab so the
-              // user sees where the item landed (AC-41).
               if (target === 'PURCHASED') setTab('purchased');
               else setTab('active');
             } catch (e) {
@@ -215,13 +198,10 @@ export default function WishlistScreen(_props: Props) {
     [fetchOnce],
   );
 
-  // -----------------------------------------------------------------
-  // Render — loading / error / content
-  // -----------------------------------------------------------------
   if (loading) {
     return (
       <View style={styles.statusContainer} testID="wishlist-loading">
-        <ActivityIndicator size="large" color="#1f6feb" />
+        <ActivityIndicator size="large" color={colors.primary} />
         <Text style={styles.statusText}>위시리스트를 불러오는 중이에요...</Text>
       </View>
     );
@@ -231,13 +211,13 @@ export default function WishlistScreen(_props: Props) {
     return (
       <View style={styles.statusContainer} testID="wishlist-error">
         <Text style={styles.errorTitle}>위시리스트를 불러오지 못했어요.</Text>
-        <Pressable
+        <Button
           testID="btn-wishlist-retry"
-          style={styles.primaryButton}
+          label="다시 시도"
+          variant="primary"
+          size="md"
           onPress={() => void fetchOnce()}
-        >
-          <Text style={styles.primaryButtonLabel}>다시 시도</Text>
-        </Pressable>
+        />
       </View>
     );
   }
@@ -253,11 +233,12 @@ export default function WishlistScreen(_props: Props) {
     <View style={styles.container} testID="wishlist-screen">
       <Text style={styles.header}>내 위시리스트</Text>
 
-      {/* Segmented control */}
       <View style={styles.tabs}>
         <Pressable
           testID="tab-btn-active"
           onPress={() => setTab('active')}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: tab === 'active' }}
           style={[styles.tabBtn, tab === 'active' && styles.tabBtnActive]}
         >
           <Text style={[styles.tabLabel, tab === 'active' && styles.tabLabelActive]}>
@@ -267,6 +248,8 @@ export default function WishlistScreen(_props: Props) {
         <Pressable
           testID="tab-btn-purchased"
           onPress={() => setTab('purchased')}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: tab === 'purchased' }}
           style={[styles.tabBtn, tab === 'purchased' && styles.tabBtnActive]}
         >
           <Text style={[styles.tabLabel, tab === 'purchased' && styles.tabLabelActive]}>
@@ -275,7 +258,6 @@ export default function WishlistScreen(_props: Props) {
         </Pressable>
       </View>
 
-      {/* Content */}
       {tab === 'active' ? (
         <View style={styles.tabContent} testID="tab-content-active">
           {activeItems.length === 0 ? (
@@ -341,62 +323,74 @@ function WishlistCard({
   const imageUrl = snap?.imageUrl ?? null;
 
   return (
-    <View style={styles.card} testID={`wishlist-card-${item.wishlistId}`}>
-      {imgFailed || imageUrl == null ? (
-        <View style={[styles.cardImage, styles.cardImagePlaceholder]} />
-      ) : (
-        <Image
-          source={{ uri: imageUrl }}
-          style={styles.cardImage}
-          onError={() => setImgFailed(true)}
-        />
-      )}
-      <View style={styles.cardBody}>
-        {missing ? (
-          <Text
-            style={styles.missingText}
-            testID={`wishlist-card-missing-${item.wishlistId}`}
-          >
-            원본 상품이 삭제되었습니다.
-          </Text>
+    <Card
+      padding="none"
+      style={styles.card}
+      testID={`wishlist-card-${item.wishlistId}`}
+    >
+      <View style={styles.cardRow}>
+        {imgFailed || imageUrl == null ? (
+          <View style={[styles.cardImage, styles.cardImagePlaceholder]} />
         ) : (
-          <>
-            <Text style={styles.cardName} numberOfLines={1}>{name}</Text>
-            <Text style={styles.cardMeta}>
-              {CATEGORY_LABELS[item.category] ?? item.category} · {formatKrw(item.price)}
-            </Text>
-            <Text style={styles.cardDate}>{formatYmd(item.addedAt)}</Text>
-          </>
+          <Image
+            source={{ uri: imageUrl }}
+            style={styles.cardImage}
+            onError={() => setImgFailed(true)}
+          />
         )}
-        <View style={styles.actions}>
-          {!missing &&
-            (item.status === 'Active' ? (
-              <Pressable
-                testID={`btn-mark-purchased-${item.wishlistId}`}
-                style={styles.btnPrimary}
-                onPress={onTogglePurchased}
-              >
-                <Text style={styles.btnPrimaryLabel}>구매 완료</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                testID={`btn-unmark-purchased-${item.wishlistId}`}
-                style={styles.btnSecondary}
-                onPress={onTogglePurchased}
-              >
-                <Text style={styles.btnSecondaryLabel}>보관 중으로 되돌리기</Text>
-              </Pressable>
-            ))}
-          <Pressable
-            testID={`btn-delete-${item.wishlistId}`}
-            style={styles.btnDelete}
-            onPress={onDelete}
-          >
-            <Text style={styles.btnDeleteLabel}>삭제</Text>
-          </Pressable>
+        <View style={styles.cardBody}>
+          {missing ? (
+            <Text
+              style={styles.missingText}
+              testID={`wishlist-card-missing-${item.wishlistId}`}
+            >
+              원본 상품이 삭제되었습니다.
+            </Text>
+          ) : (
+            <>
+              <Text style={styles.cardName} numberOfLines={1}>{name}</Text>
+              <Text style={styles.cardMeta}>
+                {CATEGORY_LABELS[item.category] ?? item.category} · {formatKrw(item.price)}
+              </Text>
+              <Text style={styles.cardDate}>{formatYmd(item.addedAt)}</Text>
+            </>
+          )}
+          <View style={styles.actions}>
+            {!missing &&
+              (item.status === 'Active' ? (
+                <Pressable
+                  testID={`btn-mark-purchased-${item.wishlistId}`}
+                  style={({ pressed }) => [styles.btnPrimary, pressed && styles.btnPressed]}
+                  onPress={onTogglePurchased}
+                  accessibilityRole="button"
+                  accessibilityLabel="구매 완료"
+                >
+                  <Text style={styles.btnPrimaryLabel}>구매 완료</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  testID={`btn-unmark-purchased-${item.wishlistId}`}
+                  style={({ pressed }) => [styles.btnSecondary, pressed && styles.btnPressed]}
+                  onPress={onTogglePurchased}
+                  accessibilityRole="button"
+                  accessibilityLabel="보관 중으로 되돌리기"
+                >
+                  <Text style={styles.btnSecondaryLabel}>보관 중으로 되돌리기</Text>
+                </Pressable>
+              ))}
+            <Pressable
+              testID={`btn-delete-${item.wishlistId}`}
+              style={({ pressed }) => [styles.btnDelete, pressed && styles.btnPressed]}
+              onPress={onDelete}
+              accessibilityRole="button"
+              accessibilityLabel="삭제"
+            >
+              <Text style={styles.btnDeleteLabel}>삭제</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -405,86 +399,112 @@ function WishlistCard({
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: '#fafafa' },
-  header: { fontSize: 22, fontWeight: '700', marginBottom: 12, color: '#222' },
+  container: {
+    flex: 1,
+    padding: spacing.md,
+    backgroundColor: colors.background,
+  },
+  header: {
+    ...typography.displayM,
+    marginBottom: spacing.md,
+  },
 
-  tabs: { flexDirection: 'row', marginBottom: 12, gap: 8 },
+  tabs: {
+    flexDirection: 'row',
+    marginBottom: spacing.sm,
+    gap: spacing.xs,
+  },
   tabBtn: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: '#d6d6d6',
-    backgroundColor: '#fff',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     alignItems: 'center',
   },
   tabBtnActive: {
-    borderColor: '#1f6feb',
-    backgroundColor: '#eef4ff',
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
   },
-  tabLabel: { color: '#555', fontSize: 14 },
-  tabLabelActive: { color: '#1f6feb', fontWeight: '600' },
+  tabLabel: { ...typography.bodyM, color: colors.textMuted },
+  tabLabelActive: { color: colors.primary, fontWeight: '600' },
 
   tabContent: { flex: 1 },
-  emptyText: { color: '#888', textAlign: 'center', marginTop: 32, fontSize: 13 },
-
-  card: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderColor: '#e3e3e3',
-    borderWidth: 1,
-    marginBottom: 10,
-    overflow: 'hidden',
+  emptyText: {
+    ...typography.bodyM,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.xl,
   },
-  cardImage: { width: 96, height: 96, backgroundColor: '#eee' },
-  cardImagePlaceholder: { backgroundColor: '#ccc' },
-  cardBody: { flex: 1, padding: 10 },
-  cardName: { fontSize: 15, fontWeight: '600', color: '#111' },
-  cardMeta: { fontSize: 13, color: '#444', marginTop: 4 },
-  cardDate: { fontSize: 12, color: '#888', marginTop: 4 },
-  missingText: { fontSize: 13, color: '#a55', marginBottom: 6 },
 
-  actions: { flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' },
+  card: { marginBottom: spacing.sm },
+  cardRow: {
+    flexDirection: 'row',
+  },
+  cardImage: {
+    width: 96, height: 96,
+    backgroundColor: colors.surfaceAlt,
+  },
+  cardImagePlaceholder: { backgroundColor: colors.surfaceAlt },
+  cardBody: { flex: 1, padding: spacing.sm },
+  cardName: { ...typography.titleM },
+  cardMeta: { ...typography.bodyM, color: colors.textSecondary, marginTop: spacing.xxs },
+  cardDate: { ...typography.caption, color: colors.textFaint, marginTop: spacing.xxs },
+  missingText: {
+    ...typography.bodyM,
+    color: colors.danger,
+    marginBottom: spacing.xs,
+  },
 
+  actions: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    flexWrap: 'wrap',
+  },
+
+  btnPressed: { opacity: 0.85 },
   btnPrimary: {
     paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: '#1f6feb',
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.primary,
   },
-  btnPrimaryLabel: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  btnPrimaryLabel: { color: colors.onPrimary, fontSize: 12, fontWeight: '600' },
   btnSecondary: {
     paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: '#1f6feb',
+    borderColor: colors.primary,
   },
-  btnSecondaryLabel: { color: '#1f6feb', fontSize: 12, fontWeight: '600' },
+  btnSecondaryLabel: { color: colors.primary, fontSize: 12, fontWeight: '600' },
   btnDelete: {
     paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: '#c44',
+    borderColor: colors.danger,
   },
-  btnDeleteLabel: { color: '#c44', fontSize: 12, fontWeight: '600' },
+  btnDeleteLabel: { color: colors.danger, fontSize: 12, fontWeight: '600' },
 
-  // status screens
+  // Status screens
   statusContainer: {
     flex: 1,
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 32,
+    padding: spacing.xl,
   },
-  statusText: { marginTop: 12, fontSize: 14, color: '#444' },
-  errorTitle: { fontSize: 15, color: '#222', textAlign: 'center', marginBottom: 16 },
-  primaryButton: {
-    backgroundColor: '#1f6feb',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 10,
+  statusText: {
+    ...typography.bodyL,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
   },
-  primaryButtonLabel: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  errorTitle: {
+    ...typography.titleM,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+  },
 });

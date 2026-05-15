@@ -67,7 +67,10 @@ describe('UploadScreen (AC-18)', () => {
       resolveUpload({ roomId: 'r1', uploadUrl: 'file:///x.jpg', status: 'PENDING_ANALYSIS' });
     });
     await waitFor(() => {
-      expect(replace).toHaveBeenCalledWith('Analyzing', { roomId: 'r1' });
+      expect(replace).toHaveBeenCalledWith(
+        'Analyzing',
+        expect.objectContaining({ roomId: 'r1' }),
+      );
     });
   });
 });

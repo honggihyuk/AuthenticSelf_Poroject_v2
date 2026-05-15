@@ -2,13 +2,9 @@
  * RecommendationScreen (UC-01-recommendation FR-23 / AC-44..AC-50).
  *
  * Renders the ranked furniture list returned by the Spring endpoint
- * `GET /api/v1/spaces/{roomId}/recommendations`. Displays four Korean
- * section headers (책상 / 침대 / 의자 / 조명) with up to N cards each,
- * plus the full-empty "NO_FIT_ANY_CATEGORY" state and the loading +
- * error states spelled out in FR-23.
- *
- * The "위시리스트에 추가" button is a stub per AC-48 — it emits an
- * analytics event + a toast; the real wishlist write lands in UC-02.
+ * `GET /api/v1/spaces/{roomId}/recommendations`. Visual layer uses the
+ * IKEA-style design system (theme + ProductCard). All testIDs, copy,
+ * analytics, and wishlist behavior are preserved from the prior version.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -48,6 +44,8 @@ import {
   PREFERRED_STYLE_LABELS,
   PreferredStyle,
 } from '../types/style';
+import { Button, ProductCard, ScreenHeader } from '../components';
+import { colors, radii, spacing, typography } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Recommendation'>;
 
@@ -65,6 +63,13 @@ const CATEGORY_LABELS: Record<string, string> = {
   lighting: '조명',
 };
 
+const CATEGORY_EYEBROW: Record<string, string> = {
+  desk: 'DESK',
+  bed: 'BED',
+  chair: 'CHAIR',
+  lighting: 'LIGHTING',
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -73,21 +78,14 @@ function showToast(msg: string): void {
   if (Platform.OS === 'android' && ToastAndroid) {
     ToastAndroid.show(msg, ToastAndroid.SHORT);
   } else {
-    // iOS / web fallback — Alert is deterministic + testable.
     Alert.alert('', msg);
   }
 }
 
 function formatKrw(v: number): string {
-  return `\u20A9${Number(v).toLocaleString('ko-KR')}`;
+  return `₩${Number(v).toLocaleString('ko-KR')}`;
 }
 
-/**
- * Phase A \u2014 backend-served curated images use relative paths like
- * "/static/furniture/<id>.jpg". `<Image>` needs an absolute URL on every
- * platform, so prefix with the configured API base URL. Naver/external
- * URLs (Phase B) already start with "http(s)://" and pass through.
- */
 function resolveImageUri(raw: string | null | undefined): string | null {
   if (!raw) return null;
   if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('data:')) {
@@ -161,11 +159,6 @@ export default function RecommendationScreen({ route, navigation }: Props) {
     void fetchOnce();
   }, [fetchOnce]);
 
-  // -------------------------------------------------------------
-  // Resolve display style label — prefer server's echoed
-  // preferredStyle; fall back to the optional route param
-  // (FR-24) if the screen is rendered before the fetch resolves.
-  // -------------------------------------------------------------
   const headerPreferredStyle: PreferredStyle | null = useMemo(() => {
     if (response?.preferredStyle) return response.preferredStyle;
     const fromRoute = (route.params as { preferredStyle?: PreferredStyle }).preferredStyle;
@@ -183,7 +176,7 @@ export default function RecommendationScreen({ route, navigation }: Props) {
   if (loading) {
     return (
       <View style={styles.statusContainer} testID="recommendation-loading">
-        <ActivityIndicator size="large" color="#1f6feb" />
+        <ActivityIndicator size="large" color={colors.primary} />
         <Text style={styles.statusText}>추천을 준비하고 있어요...</Text>
       </View>
     );
@@ -198,28 +191,27 @@ export default function RecommendationScreen({ route, navigation }: Props) {
       <View style={styles.statusContainer} testID="recommendation-error">
         <Text style={styles.errorTitle}>{title}</Text>
         {showBackButton ? (
-          <Pressable
+          <Button
             testID="btn-go-style-select"
-            style={styles.primaryButton}
+            label="스타일 선택"
+            variant="primary"
+            size="md"
             onPress={() => navigation.goBack()}
-          >
-            <Text style={styles.primaryButtonLabel}>스타일 선택</Text>
-          </Pressable>
+          />
         ) : (
-          <Pressable
+          <Button
             testID="btn-retry"
-            style={styles.primaryButton}
+            label="다시 시도"
+            variant="primary"
+            size="md"
             onPress={() => void fetchOnce()}
-          >
-            <Text style={styles.primaryButtonLabel}>다시 시도</Text>
-          </Pressable>
+          />
         )}
       </View>
     );
   }
 
   if (!response) {
-    // Belt-and-braces — after loading + no error we always have a response.
     return null;
   }
 
@@ -235,13 +227,13 @@ export default function RecommendationScreen({ route, navigation }: Props) {
         <Text style={styles.errorTitle}>
           이 공간에 딱 맞는 가구를 찾지 못했습니다. 다른 스타일을 선택해 보시겠어요?
         </Text>
-        <Pressable
+        <Button
           testID="btn-retry-style"
-          style={styles.primaryButton}
+          label="스타일 다시 선택"
+          variant="primary"
+          size="md"
           onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.primaryButtonLabel}>스타일 다시 선택</Text>
-        </Pressable>
+        />
       </View>
     );
   }
@@ -251,21 +243,26 @@ export default function RecommendationScreen({ route, navigation }: Props) {
   // -------------------------------------------------------------
   return (
     <ScrollView
-      contentContainerStyle={styles.container}
+      style={styles.scroll}
+      contentContainerStyle={styles.scrollContent}
       testID="recommendation-screen"
     >
-      <Text style={styles.header}>{headerLabel}</Text>
+      <ScreenHeader
+        eyebrow="당신을 위한 추천"
+        title={headerLabel}
+        subtitle="공간 분석을 바탕으로 4개 카테고리에서 골랐어요."
+      />
 
       {CATEGORY_ORDER.map((cat) => {
         const items = response.recommendations[cat];
         return (
           <View key={cat} style={styles.section} testID={`section-${cat}`}>
-            <Text style={styles.sectionTitle}>{CATEGORY_LABELS[cat]}</Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionEyebrow}>{CATEGORY_EYEBROW[cat]}</Text>
+              <Text style={styles.sectionTitle}>{CATEGORY_LABELS[cat]}</Text>
+            </View>
             {items.length === 0 ? (
-              <Text
-                style={styles.emptySectionText}
-                testID={`empty-${cat}`}
-              >
+              <Text style={styles.emptySectionText} testID={`empty-${cat}`}>
                 {sectionEmptyCopy(cat)}
               </Text>
             ) : (
@@ -286,7 +283,8 @@ export default function RecommendationScreen({ route, navigation }: Props) {
 }
 
 // ---------------------------------------------------------------------------
-// ItemCard — AC-45, AC-48
+// ItemCard — wraps ProductCard with the wishlist + AR + similar footer.
+// AC-45, AC-48, AR FR-1 / AC-7.
 // ---------------------------------------------------------------------------
 
 function ItemCard({
@@ -296,18 +294,9 @@ function ItemCard({
 }: {
   item: RecommendationItem;
   roomId: string;
-  // AR-furniture-placement FR-1 — thread the parent's navigation prop
-  // so the per-card "AR로 배치" button can navigate to `ARPlacement`.
-  // Typed loosely (`any`) to avoid importing the stack's full param
-  // list here; the parent `Props` already pins the name + shape.
   navigation: Props['navigation'];
 }) {
-  const [imageFailed, setImageFailed] = useState<boolean>(false);
-  const matchPct = Math.round(item.fitScore * 100);
-
-  // Phase B — "비슷한 실제 상품" cache fetch. Failures fall back to the
-  // placeholder; empty result is the dev-default (Naver creds absent / batch
-  // not yet run) so we never block the card on this network call.
+  // Phase B — "비슷한 실제 상품" cache fetch (failures fall back to placeholder).
   const [similar, setSimilar] = useState<SimilarProduct[] | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -321,10 +310,8 @@ function ItemCard({
   }, [item.furnitureId]);
 
   const onAddToWishlist = async () => {
-    // UC-01-recommendation AC-48 — analytics emit MUST still fire
-    // exactly once per tap, regardless of whether the real API call
-    // succeeds. The UC-02-wishlist AC-49 regression guard re-checks
-    // this invariant.
+    // UC-01-recommendation AC-48 — analytics emit MUST fire exactly once
+    // per tap, regardless of whether the real API call succeeds.
     emitWishlistAddClicked(roomId, item.furnitureId);
     try {
       const resp = await addToWishlist({
@@ -355,128 +342,97 @@ function ItemCard({
     }
   };
 
-  return (
-    <View
-      style={styles.card}
-      testID={`card-${item.furnitureId}`}
-    >
-      {(() => {
-        const uri = resolveImageUri(item.imageUrl);
-        if (imageFailed || uri == null) {
-          return <View style={[styles.cardImage, styles.cardImagePlaceholder]} />;
-        }
-        return (
-          <Image
-            source={{ uri }}
-            style={styles.cardImage}
-            onError={() => setImageFailed(true)}
-            testID={`card-image-${item.furnitureId}`}
-          />
-        );
-      })()}
-      <View style={styles.cardBody}>
-        <Text style={styles.cardName} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <View style={styles.cardRowPriceAndBadge}>
-          <Text style={styles.cardPrice}>{formatKrw(item.price)}</Text>
-          <Text
-            style={styles.cardBadge}
-            testID={`match-badge-${item.furnitureId}`}
-          >
-            {`매칭 ${matchPct}%`}
-          </Text>
-        </View>
-        <Text style={styles.cardRationale} numberOfLines={2}>
-          {item.rationale}
-        </Text>
-        <View style={styles.cardActionsRow}>
-          <Pressable
+  const footer = (
+    <View>
+      <View style={styles.actionsRow}>
+        <View style={styles.actionsCol}>
+          <Button
             testID={`btn-wishlist-${item.furnitureId}`}
-            style={styles.wishlistBtn}
+            label="위시리스트에 추가"
+            variant="secondary"
+            size="md"
+            fullWidth
             onPress={onAddToWishlist}
             accessibilityLabel="위시리스트에 추가"
-            accessibilityRole="button"
-          >
-            <Text style={styles.wishlistBtnLabel}>위시리스트에 추가</Text>
-          </Pressable>
-          {/*
-            AR-furniture-placement FR-1 / AC-7 — per-card "AR로 배치"
-            navigation trigger. Additive only: the wishlist button + its
-            handler are unchanged, so UC-01 AC-48 (analytics emit
-            invariant) and UC-02 AC-49 (real POST) stay green.
-          */}
-          <Pressable
-            testID={`btn-ar-${item.furnitureId}`}
-            style={styles.arBtn}
-            onPress={() =>
-              navigation.navigate('ARPlacement', { roomId, item })
-            }
-            accessibilityLabel="AR로 배치"
-            accessibilityRole="button"
-          >
-            <Text style={styles.arBtnLabel}>AR로 배치</Text>
-          </Pressable>
+          />
         </View>
-
-        {/*
-          Phase B anchor — "비슷한 실제 상품 (Naver)" 가로 스크롤 자리.
-          Phase A에서는 placeholder 상태만 노출하여 추후 Naver 검색·CLIP
-          분류 결과 캐시(furniture_similar_cache)가 채워지면 그대로 데이터
-          를 끼우면 됨. 빈 상태 동안 사용자는 "준비 중" 카피만 봄.
-        */}
-        <View testID={`similar-${item.furnitureId}`} style={styles.similarBlock}>
-          <Text style={styles.similarHeading}>비슷한 실제 상품</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.similarRow}
-          >
-            {similar == null ? (
-              // Loading state — match the placeholder footprint so the card
-              // height doesn't jump once data arrives.
-              <View style={[styles.similarPlaceholder, { justifyContent: 'center' }]}>
-                <ActivityIndicator size="small" />
-              </View>
-            ) : similar.length === 0 ? (
-              <>
-                <View style={styles.similarPlaceholder}>
-                  <Text style={styles.similarPlaceholderText}>준비 중</Text>
-                </View>
-                <View style={styles.similarPlaceholder}>
-                  <Text style={styles.similarPlaceholderText}>준비 중</Text>
-                </View>
-                <View style={styles.similarPlaceholder}>
-                  <Text style={styles.similarPlaceholderText}>준비 중</Text>
-                </View>
-              </>
-            ) : (
-              similar.map((s) => (
-                <Pressable
-                  key={`${s.source}-${s.externalId}`}
-                  testID={`similar-card-${item.furnitureId}-${s.externalId}`}
-                  style={styles.similarCard}
-                  onPress={() => { Linking.openURL(s.externalUrl).catch(() => undefined); }}
-                  accessibilityRole="link"
-                  accessibilityLabel={s.title}
-                >
-                  <Image
-                    source={{ uri: s.imageUrl }}
-                    style={styles.similarImage}
-                    referrerPolicy="no-referrer"
-                  />
-                  {s.price != null && (
-                    <Text style={styles.similarPrice} numberOfLines={1}>
-                      {formatKrw(s.price)}
-                    </Text>
-                  )}
-                </Pressable>
-              ))
-            )}
-          </ScrollView>
+        <View style={styles.actionsGap} />
+        <View style={styles.actionsCol}>
+          <Button
+            testID={`btn-ar-${item.furnitureId}`}
+            label="AR로 배치"
+            variant="primary"
+            size="md"
+            fullWidth
+            onPress={() => navigation.navigate('ARPlacement', { roomId, item })}
+            accessibilityLabel="AR로 배치"
+          />
         </View>
       </View>
+
+      <View testID={`similar-${item.furnitureId}`} style={styles.similarBlock}>
+        <Text style={styles.similarHeading}>비슷한 실제 상품</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.similarRow}
+        >
+          {similar == null ? (
+            <View style={[styles.similarPlaceholder, { justifyContent: 'center' }]}>
+              <ActivityIndicator size="small" />
+            </View>
+          ) : similar.length === 0 ? (
+            <>
+              <View style={styles.similarPlaceholder}>
+                <Text style={styles.similarPlaceholderText}>준비 중</Text>
+              </View>
+              <View style={styles.similarPlaceholder}>
+                <Text style={styles.similarPlaceholderText}>준비 중</Text>
+              </View>
+              <View style={styles.similarPlaceholder}>
+                <Text style={styles.similarPlaceholderText}>준비 중</Text>
+              </View>
+            </>
+          ) : (
+            similar.map((s) => (
+              <Pressable
+                key={`${s.source}-${s.externalId}`}
+                testID={`similar-card-${item.furnitureId}-${s.externalId}`}
+                style={styles.similarCard}
+                onPress={() => { Linking.openURL(s.externalUrl).catch(() => undefined); }}
+                accessibilityRole="link"
+                accessibilityLabel={s.title}
+              >
+                <Image
+                  source={{ uri: s.imageUrl }}
+                  style={styles.similarImage}
+                  referrerPolicy="no-referrer"
+                />
+                {s.price != null && (
+                  <Text style={styles.similarPrice} numberOfLines={1}>
+                    {formatKrw(s.price)}
+                  </Text>
+                )}
+              </Pressable>
+            ))
+          )}
+        </ScrollView>
+      </View>
     </View>
+  );
+
+  return (
+    <ProductCard
+      testID={`card-${item.furnitureId}`}
+      eyebrow={CATEGORY_EYEBROW[item.type]}
+      imageUri={resolveImageUri(item.imageUrl)}
+      name={item.name}
+      price={item.price}
+      matchScore={item.fitScore}
+      matchBadgeTestID={`match-badge-${item.furnitureId}`}
+      description={item.rationale}
+      footer={footer}
+    />
   );
 }
 
@@ -485,113 +441,82 @@ function ItemCard({
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  container: { padding: 16, paddingBottom: 64 },
-  header: { fontSize: 22, fontWeight: '700', marginBottom: 16, color: '#222' },
-  section: { marginBottom: 24 },
+  scroll: { flex: 1, backgroundColor: colors.background },
+  scrollContent: { paddingBottom: spacing.xxl },
+
+  section: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  sectionHeader: {
+    marginBottom: spacing.md,
+  },
+  sectionEyebrow: {
+    ...typography.label,
+    color: colors.primary,
+    marginBottom: spacing.xxs,
+  },
   sectionTitle: {
-    fontSize: 18, fontWeight: '600', color: '#111', marginBottom: 10,
+    ...typography.titleL,
   },
   emptySectionText: {
-    fontSize: 13, color: '#888', marginLeft: 4, marginTop: 2,
+    ...typography.bodyM,
+    color: colors.textMuted,
+    paddingVertical: spacing.md,
   },
-  card: {
+
+  actionsRow: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderColor: '#e3e3e3',
-    borderWidth: 1,
-    marginBottom: 10,
-    overflow: 'hidden',
+    alignItems: 'stretch',
   },
-  cardImage: {
-    width: 96, height: 96, backgroundColor: '#eee',
-  },
-  cardImagePlaceholder: {
-    backgroundColor: '#ccc',
-  },
-  cardBody: { flex: 1, padding: 10 },
-  cardName: { fontSize: 15, fontWeight: '600', color: '#111' },
-  cardRowPriceAndBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 4,
-  },
-  cardPrice: { fontSize: 14, color: '#333', fontWeight: '500' },
-  cardBadge: {
-    fontSize: 12, color: '#1f6feb',
-    backgroundColor: '#eef4ff', paddingVertical: 2, paddingHorizontal: 8, borderRadius: 10,
-    overflow: 'hidden',
-  },
-  cardRationale: {
-    fontSize: 12, color: '#555', marginTop: 6,
-  },
-  cardActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-    flexWrap: 'wrap',
-  },
+  actionsCol: { flex: 1 },
+  actionsGap: { width: spacing.sm },
+
   similarBlock: {
-    marginTop: 12,
+    marginTop: spacing.md,
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    paddingTop: 10,
+    borderTopColor: colors.divider,
+    paddingTop: spacing.sm,
   },
   similarHeading: {
-    fontSize: 12, fontWeight: '600', color: '#444', marginBottom: 6,
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: '600',
+    marginBottom: spacing.xs,
   },
   similarRow: { flexDirection: 'row' },
   similarPlaceholder: {
-    width: 72, height: 72, marginRight: 8,
-    backgroundColor: '#f4f4f4', borderRadius: 8,
+    width: 72, height: 72, marginRight: spacing.xs,
+    backgroundColor: colors.surfaceAlt, borderRadius: radii.md,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: '#e6e6e6', borderStyle: 'dashed',
+    borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed',
   },
-  similarPlaceholderText: { fontSize: 11, color: '#888' },
+  similarPlaceholderText: { ...typography.caption, color: colors.textFaint },
   similarCard: {
-    width: 72, marginRight: 8,
+    width: 72, marginRight: spacing.xs,
   },
   similarImage: {
-    width: 72, height: 72, borderRadius: 8, backgroundColor: '#eee',
+    width: 72, height: 72, borderRadius: radii.md, backgroundColor: colors.surfaceAlt,
   },
   similarPrice: {
-    fontSize: 10, color: '#333', marginTop: 4, fontWeight: '500',
+    fontSize: 11, color: colors.textSecondary, marginTop: 4, fontWeight: '500',
   },
-  wishlistBtn: {
-    marginRight: 8,
-    marginTop: 4,
-    paddingVertical: 8, paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1, borderColor: '#1f6feb',
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  wishlistBtnLabel: { color: '#1f6feb', fontSize: 13 },
-  arBtn: {
-    marginTop: 4,
-    paddingVertical: 8, paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: '#1f6feb',
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  arBtnLabel: { color: '#fff', fontSize: 13, fontWeight: '600' },
 
-  // status screens
+  // Status screens
   statusContainer: {
-    flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32,
+    flex: 1,
+    backgroundColor: colors.background,
+    alignItems: 'center', justifyContent: 'center',
+    padding: spacing.xl,
   },
-  statusText: { marginTop: 12, fontSize: 14, color: '#444' },
+  statusText: {
+    ...typography.bodyL,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
+  },
   errorTitle: {
-    fontSize: 15, color: '#222', textAlign: 'center', marginBottom: 16,
+    ...typography.titleM,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
   },
-  primaryButton: {
-    backgroundColor: '#1f6feb',
-    paddingVertical: 12, paddingHorizontal: 24,
-    borderRadius: 10,
-  },
-  primaryButtonLabel: { color: '#fff', fontSize: 15, fontWeight: '600' },
 });

@@ -1,6 +1,13 @@
 import React, { useState } from 'react';
 import {
-  View, Text, Pressable, Image, StyleSheet, ActivityIndicator, Alert,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,6 +16,8 @@ import { RootStackParamList } from '../../App';
 import { settings } from '../settings';
 import { uploadPhoto, UploadFailedError } from '../api/client';
 import { messageForCode } from '../api/errorMessages';
+import { Button, ScreenHeader } from '../components';
+import { colors, radii, spacing, typography } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Upload'>;
 
@@ -71,46 +80,96 @@ export default function UploadScreen({ navigation }: Props) {
   };
 
   return (
-    <View style={styles.container}>
-      {asset ? (
-        <Image testID="preview" source={{ uri: asset.uri }} style={styles.preview} />
-      ) : (
-        <Pressable testID="btn-pick" style={styles.picker} onPress={pickImage}>
-          <Text style={styles.pickerLabel}>사진 선택</Text>
-        </Pressable>
-      )}
-      {asset && asset.fileSize != null && (
-        <Text style={styles.meta}>{(asset.fileSize / 1024 / 1024).toFixed(2)} MB</Text>
-      )}
-      {asset && !uploading && (
-        <Pressable testID="btn-upload" style={styles.submit} onPress={submit}>
-          <Text style={styles.submitLabel}>업로드</Text>
-        </Pressable>
-      )}
-      {uploading && (
-        <View testID="upload-progress" style={styles.progressRow}>
-          <ActivityIndicator />
-          <Text style={styles.progressLabel}>{progress}%</Text>
-        </View>
-      )}
-    </View>
+    <SafeAreaView style={styles.safe}>
+      <ScreenHeader
+        eyebrow="STEP 1"
+        title="방 사진을 골라주세요"
+        subtitle="가구가 보이는 한 장이면 충분합니다."
+      />
+
+      <View style={styles.body}>
+        {asset ? (
+          <View style={styles.previewWrap}>
+            <Image testID="preview" source={{ uri: asset.uri }} style={styles.preview} />
+          </View>
+        ) : (
+          <Pressable
+            testID="btn-pick"
+            style={({ pressed }) => [styles.picker, pressed && styles.pickerPressed]}
+            onPress={pickImage}
+            accessibilityRole="button"
+            accessibilityLabel="사진 선택"
+          >
+            <Text style={styles.pickerHint}>탭하여 갤러리에서</Text>
+            <Text style={styles.pickerLabel}>사진 선택</Text>
+          </Pressable>
+        )}
+
+        {asset && asset.fileSize != null && (
+          <Text style={styles.meta}>{(asset.fileSize / 1024 / 1024).toFixed(2)} MB</Text>
+        )}
+      </View>
+
+      <View style={styles.footer}>
+        {asset && !uploading && (
+          <Button
+            testID="btn-upload"
+            label="업로드"
+            variant="primary"
+            size="lg"
+            fullWidth
+            onPress={submit}
+          />
+        )}
+        {uploading && (
+          <View testID="upload-progress" style={styles.progressRow}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.progressLabel}>{progress}%</Text>
+          </View>
+        )}
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container:      { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  picker:         {
-    width: 220, height: 220, borderRadius: 12, borderWidth: 2,
-    borderColor: '#1f6feb', alignItems: 'center', justifyContent: 'center',
+  safe: { flex: 1, backgroundColor: colors.background },
+  body: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
   },
-  pickerLabel:    { color: '#1f6feb', fontSize: 16, fontWeight: '600' },
-  preview:        { width: 220, height: 220, borderRadius: 12, resizeMode: 'cover' },
-  meta:           { marginTop: 12, color: '#555' },
-  submit:         {
-    marginTop: 24, backgroundColor: '#1f6feb', paddingVertical: 14,
-    paddingHorizontal: 32, borderRadius: 12,
+  picker: {
+    width: 260, height: 260,
+    borderRadius: radii.lg,
+    borderWidth: 2, borderStyle: 'dashed', borderColor: colors.primary,
+    backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center',
   },
-  submitLabel:    { color: 'white', fontSize: 16, fontWeight: '600' },
-  progressRow:    { marginTop: 24, flexDirection: 'row', alignItems: 'center' },
-  progressLabel:  { marginLeft: 12, fontSize: 16 },
+  pickerPressed: { backgroundColor: colors.primarySoft },
+  pickerHint: { ...typography.caption, color: colors.textMuted, marginBottom: spacing.xs },
+  pickerLabel: { ...typography.titleM, color: colors.primary },
+  previewWrap: {
+    borderRadius: radii.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  preview: { width: 260, height: 260, resizeMode: 'cover' },
+  meta: { ...typography.bodyM, color: colors.textMuted, marginTop: spacing.sm },
+
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
+    paddingTop: spacing.md,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 56,
+  },
+  progressLabel: { ...typography.titleM, color: colors.textPrimary, marginLeft: spacing.sm },
 });

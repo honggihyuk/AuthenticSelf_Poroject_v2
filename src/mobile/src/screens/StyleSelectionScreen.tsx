@@ -1,6 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import {
-  View, Text, Pressable, StyleSheet, ScrollView, Alert,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -14,6 +19,8 @@ import {
   PreferredStyle,
   Style,
 } from '../types/style';
+import { Button, ScreenHeader } from '../components';
+import { colors, radii, spacing, typography } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'StyleSelection'>;
 
@@ -31,7 +38,6 @@ type Props = NativeStackScreenProps<RootStackParamList, 'StyleSelection'>;
 export default function StyleSelectionScreen({ route, navigation }: Props) {
   const { roomId, aiDetectedStyle, aiDetectedConfidence, photoUri } = route.params;
 
-  // Pre-select: AI-detected style if present, otherwise CURRENT.
   const initialSelection: PreferredStyle = useMemo(() => {
     if (aiDetectedStyle) return aiDetectedStyle as PreferredStyle;
     return 'CURRENT';
@@ -76,105 +82,154 @@ export default function StyleSelectionScreen({ route, navigation }: Props) {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} testID="style-selection-screen">
-      <Text style={styles.title}>원하는 스타일을 선택하세요</Text>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      testID="style-selection-screen"
+    >
+      <ScreenHeader
+        eyebrow="STEP 2"
+        title="원하는 스타일을 선택하세요"
+        subtitle="추천에 반영할 분위기를 골라주세요."
+      />
 
-      {aiDetectedStyle == null && (
-        <Text testID="ai-fallback" style={styles.fallback}>
-          AI 스타일 감지에 실패했습니다. 직접 선택해주세요.
-        </Text>
-      )}
+      <View style={styles.list}>
+        {aiDetectedStyle == null && (
+          <Text testID="ai-fallback" style={styles.fallback}>
+            AI 스타일 감지에 실패했습니다. 직접 선택해주세요.
+          </Text>
+        )}
 
-      {PREFERRED_STYLES.map((style) => {
-        const isSelected  = selected === style;
-        const isAiPick    = aiDetectedStyle != null && aiDetectedStyle === style;
-        const korean      = PREFERRED_STYLE_LABELS[style];
-        const englishName =
-          style === 'CURRENT' ? null : STYLE_DISPLAY_NAMES[style as Style];
+        {PREFERRED_STYLES.map((style) => {
+          const isSelected  = selected === style;
+          const isAiPick    = aiDetectedStyle != null && aiDetectedStyle === style;
+          const korean      = PREFERRED_STYLE_LABELS[style];
+          const englishName =
+            style === 'CURRENT' ? null : STYLE_DISPLAY_NAMES[style as Style];
 
-        return (
-          <Pressable
-            key={style}
-            testID={`style-option-${style}`}
-            style={[styles.row, isSelected && styles.rowSelected]}
-            onPress={() => setSelected(style)}
-          >
-            <View style={[styles.radio, isSelected && styles.radioSelected]} />
-            <View style={styles.rowText}>
-              <Text style={styles.rowLabel}>
-                {korean}
-                {englishName ? ` (${englishName})` : ''}
-              </Text>
-              {isAiPick && confidencePct != null && (
-                <Text testID={`ai-badge-${style}`} style={styles.aiBadge}>
-                  AI가 감지한 스타일: {englishName ?? korean} ({confidencePct}%)
+          return (
+            <Pressable
+              key={style}
+              testID={`style-option-${style}`}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: isSelected }}
+              style={({ pressed }) => [
+                styles.row,
+                isSelected && styles.rowSelected,
+                pressed && !isSelected && styles.rowPressed,
+              ]}
+              onPress={() => setSelected(style)}
+            >
+              <View style={[styles.radio, isSelected && styles.radioSelected]}>
+                {isSelected && <View style={styles.radioDot} />}
+              </View>
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>
+                  {korean}
+                  {englishName ? ` (${englishName})` : ''}
                 </Text>
-              )}
-              {isAiPick && confidencePct == null && (
-                <Text testID={`ai-badge-${style}`} style={styles.aiBadge}>
-                  AI가 감지한 스타일: {englishName ?? korean}
-                </Text>
-              )}
-            </View>
-          </Pressable>
-        );
-      })}
+                {isAiPick && confidencePct != null && (
+                  <Text testID={`ai-badge-${style}`} style={styles.aiBadge}>
+                    AI가 감지한 스타일: {englishName ?? korean} ({confidencePct}%)
+                  </Text>
+                )}
+                {isAiPick && confidencePct == null && (
+                  <Text testID={`ai-badge-${style}`} style={styles.aiBadge}>
+                    AI가 감지한 스타일: {englishName ?? korean}
+                  </Text>
+                )}
+              </View>
+            </Pressable>
+          );
+        })}
 
-      {inlineError != null && (
-        <Text testID="inline-error" style={styles.errorText}>{inlineError}</Text>
-      )}
+        {inlineError != null && (
+          <Text testID="inline-error" style={styles.errorText}>{inlineError}</Text>
+        )}
+      </View>
 
-      <Pressable
-        testID="btn-objects"
-        style={styles.secondaryBtn}
-        onPress={() => navigation.navigate('Objects', { roomId, photoUri })}
-      >
-        <Text style={styles.secondaryBtnLabel}>객체 검출 보기</Text>
-      </Pressable>
-
-      <Pressable
-        testID="btn-next"
-        disabled={submitting}
-        style={[styles.submit, submitting && { opacity: 0.6 }]}
-        onPress={submit}
-      >
-        <Text style={styles.submitLabel}>다음</Text>
-      </Pressable>
+      <View style={styles.actions}>
+        <Button
+          testID="btn-objects"
+          label="객체 검출 보기"
+          variant="ghost"
+          size="md"
+          fullWidth
+          onPress={() => navigation.navigate('Objects', { roomId, photoUri })}
+        />
+        <View style={styles.gap} />
+        <Button
+          testID="btn-next"
+          label="다음"
+          variant="primary"
+          size="lg"
+          fullWidth
+          disabled={submitting}
+          onPress={submit}
+        />
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 80 },
-  title:     { fontSize: 20, fontWeight: '700', marginBottom: 16 },
-  fallback:  { fontSize: 13, color: '#666', marginBottom: 12 },
+  scroll: { flex: 1, backgroundColor: colors.background },
+  container: { paddingBottom: spacing.xxl },
+
+  list: { paddingHorizontal: spacing.lg, marginTop: spacing.md },
+
+  fallback: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+
   row: {
-    flexDirection: 'row', alignItems: 'flex-start',
-    paddingVertical: 14, paddingHorizontal: 12,
-    borderRadius: 10, borderWidth: 1, borderColor: '#ddd',
-    marginBottom: 10, backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.xs,
+    backgroundColor: colors.surface,
   },
-  rowSelected: { borderColor: '#1f6feb', backgroundColor: '#eef4ff' },
+  rowSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  rowPressed: { backgroundColor: colors.surfaceAlt },
+
   radio: {
-    width: 20, height: 20, borderRadius: 10,
-    borderWidth: 2, borderColor: '#888', marginRight: 12, marginTop: 2,
+    width: 22, height: 22, borderRadius: 11,
+    borderWidth: 2, borderColor: colors.textMuted,
+    marginRight: spacing.sm, marginTop: 2,
+    alignItems: 'center', justifyContent: 'center',
   },
-  radioSelected: {
-    borderColor: '#1f6feb',
-    backgroundColor: '#1f6feb',
+  radioSelected: { borderColor: colors.primary },
+  radioDot: {
+    width: 10, height: 10, borderRadius: 5,
+    backgroundColor: colors.primary,
   },
-  rowText:   { flex: 1 },
-  rowLabel:  { fontSize: 16, color: '#222' },
-  aiBadge:   { fontSize: 12, color: '#1f6feb', marginTop: 4 },
-  submit: {
-    marginTop: 16, backgroundColor: '#1f6feb',
-    paddingVertical: 14, borderRadius: 12, alignItems: 'center',
+
+  rowText: { flex: 1 },
+  rowLabel: { ...typography.bodyL, color: colors.textPrimary },
+  aiBadge: {
+    ...typography.caption,
+    color: colors.primary,
+    marginTop: spacing.xxs,
   },
-  submitLabel: { color: 'white', fontSize: 16, fontWeight: '600' },
-  errorText:   { color: '#c22', marginTop: 12, fontSize: 13 },
-  secondaryBtn: {
-    marginTop: 16, paddingVertical: 12, borderRadius: 10,
-    borderWidth: 1, borderColor: '#1f6feb', alignItems: 'center',
+
+  errorText: {
+    ...typography.bodyM,
+    color: colors.danger,
+    marginTop: spacing.sm,
   },
-  secondaryBtnLabel: { color: '#1f6feb', fontSize: 15, fontWeight: '600' },
+
+  actions: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+  },
+  gap: { height: spacing.sm },
 });
