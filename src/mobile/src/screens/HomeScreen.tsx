@@ -3,6 +3,7 @@ import { SafeAreaView, StyleSheet, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList } from '../../App';
+import { useAuth } from '../auth/AuthContext';
 import { Button, ScreenHeader } from '../components';
 import { colors, spacing } from '../theme';
 
@@ -15,13 +16,17 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
  * UC-02 AC-48: secondary "위시리스트 보기" navigates to the wishlist screen.
  */
 export default function HomeScreen({ navigation }: Props) {
+  const { state, logout } = useAuth();
+  const subtitle = state?.name
+    ? `${state.name}님, 사진 한 장이면 충분합니다.`
+    : '사진 한 장이면 충분합니다.';
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
         <ScreenHeader
           eyebrow="AUTHENTICSELF"
           title="당신의 방에 꼭 맞는 가구를 찾아드릴게요."
-          subtitle="사진 한 장이면 충분합니다."
+          subtitle={subtitle}
         />
         <View style={styles.actions}>
           <Button
@@ -40,6 +45,15 @@ export default function HomeScreen({ navigation }: Props) {
             size="lg"
             fullWidth
             onPress={() => navigation.navigate('Wishlist')}
+          />
+          <View style={styles.gap} />
+          <Button
+            testID="btn-logout"
+            label="로그아웃"
+            variant="ghost"
+            size="md"
+            fullWidth
+            onPress={logout}
           />
         </View>
       </View>

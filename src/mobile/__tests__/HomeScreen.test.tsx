@@ -2,6 +2,11 @@ import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 
 import HomeScreen from '../src/screens/HomeScreen';
+import { AuthProvider } from '../src/auth/AuthContext';
+
+const withAuth = (children: React.ReactElement) => (
+  <AuthProvider>{children}</AuthProvider>
+);
 
 /**
  * AC-17 — a button with exact visible label "방 사진 하나로 가구 추천"
@@ -11,7 +16,7 @@ describe('HomeScreen (AC-17)', () => {
   it('renders the CTA with the exact PRD label', () => {
     const navigation: any = { navigate: jest.fn() };
     const { getByText } = render(
-      <HomeScreen navigation={navigation} route={{ key: 'Home', name: 'Home' } as any} />,
+      withAuth(<HomeScreen navigation={navigation} route={{ key: 'Home', name: 'Home' } as any} />),
     );
     expect(getByText('방 사진 하나로 가구 추천')).toBeTruthy();
   });
@@ -20,7 +25,7 @@ describe('HomeScreen (AC-17)', () => {
     const navigate = jest.fn();
     const navigation: any = { navigate };
     const { getByText } = render(
-      <HomeScreen navigation={navigation} route={{ key: 'Home', name: 'Home' } as any} />,
+      withAuth(<HomeScreen navigation={navigation} route={{ key: 'Home', name: 'Home' } as any} />),
     );
     fireEvent.press(getByText('방 사진 하나로 가구 추천'));
     expect(navigate).toHaveBeenCalledWith('Upload');
@@ -32,7 +37,7 @@ describe('HomeScreen (AC-17)', () => {
     const navigate = jest.fn();
     const navigation: any = { navigate };
     const { getByTestId, getByText } = render(
-      <HomeScreen navigation={navigation} route={{ key: 'Home', name: 'Home' } as any} />,
+      withAuth(<HomeScreen navigation={navigation} route={{ key: 'Home', name: 'Home' } as any} />),
     );
 
     // Both buttons coexist.

@@ -18,8 +18,14 @@ function resolveWebBaseUrl(): string {
   return `${window.location.protocol}//${host}:${BACKEND_PORT}`;
 }
 
+/**
+ * Runtime app settings. `userId` is intentionally mutable — AuthContext
+ * writes the logged-in user's id here on login and clears it on logout, so
+ * the existing screens that read `settings.userId` keep working without a
+ * per-screen refactor. Screens that mount only inside UserStack/AdminStack
+ * always observe a non-empty value.
+ */
 export const settings = {
   apiBaseUrl: resolveWebBaseUrl(),
-  /** Dev stub — replaced by real auth in a later task. */
-  userId: 'u_dev',
+  userId: '' as string,
 };
