@@ -233,7 +233,10 @@
       "PowerShell(Set-Location \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\mobile\"; & node \".\\\\node_modules\\\\jest\\\\bin\\\\jest.js\" __tests__/UploadScreen.test.tsx --colors=false 2>&1 | Select-String -Pattern \"PASS|FAIL|Tests:|Test Suites:\" | Select-Object -Last 10; Write-Output \"EXIT=$LASTEXITCODE\")",
       "PowerShell(Set-Location \"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\mobile\"; & node \".\\\\node_modules\\\\jest\\\\bin\\\\jest.js\" --colors=false --testTimeout=15000 2>&1 | Select-String -Pattern \"PASS|FAIL|Tests:|Test Suites:\" | Select-Object -Last 15; Write-Output \"EXIT=$LASTEXITCODE\")",
       "PowerShell(try { \\(Invoke-WebRequest -Uri \"http://localhost:8082\" -UseBasicParsing -TimeoutSec 5\\).StatusCode } catch { \"ERROR: $\\($_.Exception.Message\\)\" })",
-      "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://localhost:8082\" -UseBasicParsing -TimeoutSec 120; \"STATUS=$\\($r.StatusCode\\) LEN=$\\($r.Content.Length\\)\" } catch { \"ERROR: $\\($_.Exception.Message\\)\" })"
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://localhost:8082\" -UseBasicParsing -TimeoutSec 120; \"STATUS=$\\($r.StatusCode\\) LEN=$\\($r.Content.Length\\)\" } catch { \"ERROR: $\\($_.Exception.Message\\)\" })",
+      "PowerShell(Push-Location src\\\\backend; $env:DB_URL=\"jdbc:mysql://localhost:3306/authentic_db?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8\"; $env:DB_USER=\"root\"; $env:DB_PASSWORD=\"rootroot\"; .\\\\gradlew.bat bootRun --no-daemon --args=\"--server.port=18080\"; Pop-Location)",
+      "PowerShell(Get-NetFirewallPortFilter *)",
+      "PowerShell($env:AI_PHOTO_ROOT=\"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\backend\\\\var\\\\object-storage\"; Push-Location src\\\\ai; .\\\\.venv\\\\Scripts\\\\python.exe -m uvicorn app.main:app --port 8001 --host 0.0.0.0; Pop-Location)"
     ]
   }
 }

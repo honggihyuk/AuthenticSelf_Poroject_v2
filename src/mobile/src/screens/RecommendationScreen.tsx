@@ -253,6 +253,18 @@ export default function RecommendationScreen({ route, navigation }: Props) {
         subtitle="공간 분석을 바탕으로 4개 카테고리에서 골랐어요."
       />
 
+      <View style={styles.headerActions}>
+        <Button
+          testID="btn-go-wishlist"
+          label="내 위시리스트 보기"
+          variant="secondary"
+          size="sm"
+          onPress={() => navigation.navigate('Wishlist')}
+          labelStyle={{ fontSize: 13 }}
+          accessibilityLabel="내 위시리스트 보기"
+        />
+      </View>
+
       {CATEGORY_ORDER.map((cat) => {
         const items = response.recommendations[cat];
         return (
@@ -353,6 +365,7 @@ function ItemCard({
             size="md"
             fullWidth
             onPress={onAddToWishlist}
+            labelStyle={styles.actionBtnLabel}
             accessibilityLabel="위시리스트에 추가"
           />
         </View>
@@ -365,6 +378,7 @@ function ItemCard({
             size="md"
             fullWidth
             onPress={() => navigation.navigate('ARPlacement', { roomId, item })}
+            labelStyle={styles.actionBtnLabel}
             accessibilityLabel="AR로 배치"
           />
         </View>
@@ -465,12 +479,18 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
 
+  headerActions: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    alignItems: 'flex-end',
+  },
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'stretch',
   },
   actionsCol: { flex: 1 },
   actionsGap: { width: spacing.sm },
+  actionBtnLabel: { fontSize: 14 },
 
   similarBlock: {
     marginTop: spacing.md,

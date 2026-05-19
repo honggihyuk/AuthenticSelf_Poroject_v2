@@ -20,6 +20,7 @@ export interface ButtonProps extends Omit<PressableProps, 'style' | 'children'> 
   size?: ButtonSize;
   fullWidth?: boolean;
   disabled?: boolean;
+  labelStyle?: TextStyle;
 }
 
 /**
@@ -33,6 +34,7 @@ export function Button({
   size = 'md',
   fullWidth,
   disabled,
+  labelStyle,
   ...rest
 }: ButtonProps) {
   const heights: Record<ButtonSize, number> = { sm: 36, md: 48, lg: 56 };
@@ -57,7 +59,7 @@ export function Button({
         disabled && styles.disabled,
       ]}
     >
-      <Text style={[styles.label, variantLabel[variant], disabled && styles.labelDisabled]}>
+      <Text style={[styles.label, variantLabel[variant], disabled && styles.labelDisabled, labelStyle]}>
         {label}
       </Text>
     </Pressable>
