@@ -5,12 +5,10 @@ import com.authenticself.domain.FurnitureSimilarCache;
 import com.authenticself.repository.FurnitureSimilarCacheRepository;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
@@ -31,8 +29,6 @@ import java.util.List;
  * derived from public Naver Shopping listings.</p>
  */
 @RestController
-@CrossOrigin(origins = "*", allowedHeaders = "*",
-        methods = { RequestMethod.GET, RequestMethod.POST, RequestMethod.OPTIONS })
 public class FurnitureSimilarController {
 
     private final FurnitureSimilarCacheRepository cacheRepository;

@@ -1,0 +1,169 @@
+openapi: 3.0.3
+info:
+  title: AuthenticSelf — Auth + Bearer Surface
+  version: "1.0.0"
+  description: |
+    OpenAPI stub for the UC-SECURE-AUTH task.
+    - Login envelope unchanged (FR-BC-1).
+    - All other endpoints require the bearerAuth security scheme defined
+      below; the JwtAuthFilter cross-validates X-User-Id against the JWT
+      sub claim and rejects mismatches with USER_ID_MISMATCH.
+
+servers:
+  - url: http://localhost:8080
+    description: Local dev
+
+# ---------------------------------------------------------------
+# Global security default: every endpoint EXCEPT /api/v1/auth/login
+# requires bearerAuth + the X-User-Id header. The login endpoint
+# overrides this with `security: []` at the operation level.
+# ---------------------------------------------------------------
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      summary: Issue an HS256 JWT after BCrypt password verification.
+      security: []   # unauthenticated; JwtAuthFilter bypasses /auth/login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Success — JWT issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Missing username and/or password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing-fields:
+                  value:
+                    errorCode: MISSING_FIELDS
+                    message: "아이디와 비밀번호를 입력해주세요."
+                    correlationId: "5fcb6a7d-2b81-4b04-8b18-1d8e7a3c5b9e"
+        '401':
+          description: Invalid credentials (unknown user OR wrong password — uniform UX).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid-credentials:
+                  value:
+                    errorCode: INVALID_CREDENTIALS
+                    message: "아이디 또는 비밀번호가 올바르지 않습니다."
+                    correlationId: "8b8e5d4c-8d77-4d65-9bb1-7e62a8b8a3c2"
+
+  # Example of an authenticated endpoint — the same security scheme
+  # applies to every other /api/v1/** path under the global default.
+  /api/v1/spaces/{roomId}:
+    parameters:
+      - $ref: '#/components/parameters/XUserId'
+    get:
+      operationId: getSpace
+      summary: Returns the current analysis state for the room.
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK.
+        '401':
+          description: |
+            JWT auth failure. Possible errorCodes:
+            - INVALID_TOKEN — missing Bearer, malformed, expired, bad
+              signature, OR missing X-User-Id header.
+            - USER_ID_MISMATCH — X-User-Id header does not equal the
+              verified JWT sub claim.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256-signed JWT issued by POST /api/v1/auth/login.
+        Claims:
+          - sub  : the user's `users.user_id` (also sent as X-User-Id; the
+                   JwtAuthFilter cross-validates equality on every
+                   non-login /api/v1/** request).
+          - role : 'USER' or 'ADMIN'.
+          - name : display name copied from users.name at issue time.
+          - iat  : issued-at epoch seconds.
+          - exp  : iat + 604800 (exactly 7 days).
+        Secret: APP_AUTH_JWT_SECRET env var, min 32 bytes UTF-8.
+        Fail-fast on bean construction if missing or short (see
+        docs/deployment/env.md).
+
+  parameters:
+    XUserId:
+      in: header
+      name: X-User-Id
+      required: true
+      schema: { type: string }
+      description: |
+        Caller's userId. MUST equal the verified JWT sub claim;
+        mismatches return 401 USER_ID_MISMATCH (UC-SECURE-AUTH FR-11,
+        D-1). Backwards-compatible with the pre-task X-User-Id
+        contract — controllers still read this header directly; the
+        filter adds the cross-check.
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, example: user }
+        password: { type: string, format: password, example: "1234" }
+
+    LoginResponse:
+      type: object
+      required: [token, userId, role, name]
+      properties:
+        token:
+          type: string
+          description: HS256-signed JWT (see bearerAuth security scheme).
+          example: "eyJhbGciOiJIUzI1NiJ9..."
+        userId: { type: string, example: user }
+        role:
+          type: string
+          enum: [USER, ADMIN]
+        name: { type: string, example: "일반사용자" }
+
+    ErrorResponse:
+      type: object
+      required: [errorCode, message, correlationId]
+      properties:
+        errorCode:
+          type: string
+          description: Stable English UPPER_SNAKE code; machine-matchable.
+          enum:
+            - MISSING_FIELDS
+            - INVALID_CREDENTIALS
+            - INVALID_TOKEN
+            - USER_ID_MISMATCH
+        message:
+          type: string
+          description: User-facing Korean message.
+        correlationId:
+          type: string
+          format: uuid
+          description: UUIDv4 for log correlation.

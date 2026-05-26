@@ -2,11 +2,13 @@ package com.authenticself.space;
 
 import com.authenticself.ai.AIErrorCode;
 import com.authenticself.ai.AIException;
+import com.authenticself.ai.ObjectsAnalysisClient;
 import com.authenticself.ai.RecommendationOrchestrator;
 import com.authenticself.ai.SpaceAnalysisPersistence;
 import com.authenticself.ai.dto.RecommendationItem;
 import com.authenticself.ai.dto.RecommendationResponse;
 import com.authenticself.ai.dto.ScoreBreakdown;
+import com.authenticself.repository.FurnitureRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -56,6 +58,9 @@ class SpaceControllerRecommendationsTest {
     @Autowired ObjectMapper json;
     @MockBean SpaceAnalysisPersistence persistence;
     @MockBean RecommendationOrchestrator orchestrator;
+    // Added retroactively — see SpaceControllerTest comment.
+    @MockBean ObjectsAnalysisClient    objectsAnalysisClient;
+    @MockBean FurnitureRepository      furnitureRepository;
 
     private RecommendationResponse happyResponse;
 
@@ -78,9 +83,13 @@ class SpaceControllerRecommendationsTest {
     }
 
     private RecommendationItem deskItem(String id, double fitScore) {
+        // modelUrl param added to RecommendationItem record in commit
+        // 46ce518 (as_objects_00); this test pre-dates that change.
+        // Passing null keeps the assertions in this file unchanged.
         return new RecommendationItem(
                 id, "Mock Desk", "desk", 189000,
                 "https://cdn.example.com/" + id + ".jpg",
+                null,
                 fitScore,
                 new ScoreBreakdown(1.0, 1.0, 0.85, 1.0),
                 "모던 스타일 일치"

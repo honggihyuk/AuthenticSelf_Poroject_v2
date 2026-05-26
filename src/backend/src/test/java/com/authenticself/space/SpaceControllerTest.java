@@ -1,10 +1,12 @@
 package com.authenticself.space;
 
+import com.authenticself.ai.ObjectsAnalysisClient;
 import com.authenticself.ai.RecommendationOrchestrator;
 import com.authenticself.ai.SpaceAnalysisPersistence;
 import com.authenticself.ai.SpaceNotFoundException;
 import com.authenticself.ai.StyleConfidenceCache;
 import com.authenticself.domain.Space;
+import com.authenticself.repository.FurnitureRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +46,12 @@ class SpaceControllerTest {
     @Autowired ObjectMapper   json;
     @MockBean  SpaceAnalysisPersistence persistence;
     @MockBean  RecommendationOrchestrator recommendationOrchestrator;
+    // Added retroactively because the as_objects_00 commit introduced
+    // these dependencies on SpaceController without updating the slice
+    // test (UC-SECURE-AUTH design.md — "pre-existing failures fixed in
+    // the smallest possible way to unblock the test run").
+    @MockBean  ObjectsAnalysisClient   objectsAnalysisClient;
+    @MockBean  FurnitureRepository     furnitureRepository;
 
     @BeforeEach
     void init() {

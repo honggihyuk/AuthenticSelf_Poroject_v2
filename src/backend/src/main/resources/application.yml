@@ -48,6 +48,16 @@ logging:
 # respect the standard Spring property-source chain.
 # ------------------------------------------------------------------
 app:
+  # UC-SECURE-AUTH FR-SEC-1 / FR-CORS-1 / FR-SEC-3 — secrets and CORS.
+  # `auth.jwt.secret` has NO default — fail-fast on startup if the env
+  # var is missing or shorter than 32 bytes (see JwtService and
+  # docs/deployment/env.md).
+  auth:
+    jwt:
+      secret: ${APP_AUTH_JWT_SECRET}
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:8082,http://localhost:8081}
+
   storage:
     local:
       root: ${APP_STORAGE_LOCAL_ROOT:./var/object-storage}

@@ -25,6 +25,16 @@ dependencies {
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-mysql'
 
+    // UC-SECURE-AUTH FR-1 — JWT issuance & verification (HS256).
+    // Compile-only API + runtime impl/jackson per jjwt 0.12.x layout.
+    // NOT pulling spring-boot-starter-security (we run our own OncePerRequestFilter).
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly    'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly    'io.jsonwebtoken:jjwt-jackson:0.12.6'
+
+    // UC-SECURE-AUTH FR-6 — BCryptPasswordEncoder (no full filter chain).
+    implementation 'org.springframework.security:spring-security-crypto:6.2.4'
+
     // Runtime DB drivers
     runtimeOnly 'com.mysql:mysql-connector-j'
     // H2 available under the 'h2' Spring profile for fast CI migration checks.
@@ -59,5 +69,7 @@ tasks.named('test') {
         exclude '**/admin/AdminOverviewRepositoryTest*'
         exclude '**/wishlist/WishlistServiceConcurrencyTest*'
         exclude '**/wishlist/WishlistStateMachineInvariantTest*'
+        // UC-SECURE-AUTH — full-context integration test needs MySQL.
+        exclude '**/auth/JwtAuthFilterIntegrationTest*'
     }
 }

@@ -59,6 +59,14 @@ public class User {
             columnDefinition = "ENUM('USER','ADMIN')")
     private Role role = Role.USER;
 
+    // UC-SECURE-AUTH FR-8 / AC-8 — password_hash column added in V11.
+    // Stores the BCrypt digest of the user's login password (60 chars for
+    // the $2a$/$2b$/$2y$ variants; column width 72 leaves headroom). The
+    // field is NEVER serialized to the wire — the login response uses
+    // LoginResponse, not User — so no @JsonIgnore is required.
+    @Column(name = "password_hash", nullable = false, length = 72)
+    private String passwordHash;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -78,6 +86,9 @@ public class User {
 
     public Role getRole()               { return role; }
     public void setRole(Role v)         { this.role = v; }
+
+    public String getPasswordHash()         { return passwordHash; }
+    public void   setPasswordHash(String v) { this.passwordHash = v; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

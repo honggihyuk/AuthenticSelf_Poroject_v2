@@ -1,0 +1,250 @@
+[
+  {
+    "id": "AC-1",
+    "fr_ref": "FR-1",
+    "layer": "backend",
+    "description": "src/backend/build.gradle declares dependencies on io.jsonwebtoken:jjwt-api:0.12.6 (implementation), io.jsonwebtoken:jjwt-impl:0.12.6 (runtimeOnly), and io.jsonwebtoken:jjwt-jackson:0.12.6 (runtimeOnly). No other new runtime dependency is added beyond the jjwt trio and (directly or transitively) spring-security-crypto. spring-boot-starter-security is NOT added.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/build.gradle"
+  },
+  {
+    "id": "AC-2",
+    "fr_ref": "FR-2,FR-3",
+    "layer": "backend",
+    "description": "com.authenticself.auth.JwtService exists as a @Service with public methods String issue(String userId, String role, String name) and JwtVerification verify(String token). The class reads the HS256 secret from a constructor-injected @Value(\"${app.auth.jwt.secret}\") parameter or environment, and constructs the SecretKey via Keys.hmacShaKeyFor(...) of the secret bytes. Constructor throws IllegalStateException when the secret is null/empty/shorter than 32 bytes.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/auth/JwtService.java"
+  },
+  {
+    "id": "AC-3",
+    "fr_ref": "FR-2",
+    "layer": "backend",
+    "description": "JwtService.issue(\"user\", \"USER\", \"일반사용자\") returns a non-blank string that parses as a JWT with header {alg:HS256, typ:JWT} and payload claims sub=user, role=USER, name=일반사용자, plus numeric iat and exp. Verified by decoding the JWT in a test using the same jjwt parser.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/JwtServiceTest.java#issue_emitsHs256JwtWithExpectedClaims_ac3"
+  },
+  {
+    "id": "AC-4",
+    "fr_ref": "FR-4",
+    "layer": "backend",
+    "description": "For any JWT produced by JwtService.issue(...), exp - iat == 604800 (exactly 7 days in seconds). Verified by decoding the claims with the jjwt parser and asserting the integer difference.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/JwtServiceTest.java#ttlIsExactly7Days_ac4"
+  },
+  {
+    "id": "AC-5",
+    "fr_ref": "FR-5",
+    "layer": "backend",
+    "description": "Two JwtService instances constructed with the same secret bytes mutually verify tokens issued by the other (simulates backend restart statelessness). Additionally, two issue() calls with the same (userId, role, name) and the same fixed Clock produce byte-identical JWT strings (HS256 determinism).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/JwtServiceTest.java#statelessVerifyAcrossInstances_ac5"
+  },
+  {
+    "id": "AC-6",
+    "fr_ref": "FR-3",
+    "layer": "backend",
+    "description": "JwtService.verify throws AuthException(INVALID_TOKEN) for: (a) a token signed with a different HS256 secret (bad signature), (b) a token whose exp is in the past (expired — test uses an injectable Clock advanced past exp), (c) a malformed string (\"not.a.jwt\"), (d) a token missing the sub claim. Each case is a separate JUnit @Test method.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/JwtServiceTest.java#verifyFailureModes_ac6"
+  },
+  {
+    "id": "AC-7",
+    "fr_ref": "FR-6,FR-7,FR-8",
+    "layer": "db",
+    "description": "src/backend/src/main/resources/db/migration/V11__add_users_password_hash.sql exists. It (a) adds users.password_hash VARCHAR(72) NULL AFTER role, (b) backfills any NULL value with literal '__BOOTSTRAP_PLACEHOLDER__', (c) modifies the column to NOT NULL. Header comment explicitly notes that DemoUserBootstrap overwrites the placeholder on next boot and that the placeholder is intentionally not a valid BCrypt hash.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/main/resources/db/migration/V11__add_users_password_hash.sql"
+  },
+  {
+    "id": "AC-8",
+    "fr_ref": "FR-7,FR-8",
+    "layer": "db",
+    "description": "After all migrations run on MySQL 8 Testcontainers, INFORMATION_SCHEMA.COLUMNS shows users.password_hash with DATA_TYPE='varchar', CHARACTER_MAXIMUM_LENGTH=72, IS_NULLABLE='NO'. com.authenticself.domain.User has a @Column(name=\"password_hash\", nullable=false, length=72) field with getPasswordHash() / setPasswordHash(String) accessors.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/migration/V11PasswordHashMigrationTest.java#columnShape_ac8"
+  },
+  {
+    "id": "AC-9",
+    "fr_ref": "FR-9,FR-BC-4",
+    "layer": "backend",
+    "description": "On the first boot after V11 runs, DemoUserBootstrap.ensure(...) overwrites password_hash for both 'admin' and 'user' rows with BCryptPasswordEncoder.encode(\"1234\"). On the second boot (DB still seeded), the same rows are detected as having a $2a$/$2b$/$2y$ prefix and NOT overwritten — verified by capturing the hash bytes before/after the second boot and asserting equality. The bootstrap logs at most one INFO line per row and never logs the plaintext \"1234\".",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/DemoUserBootstrapTest.java#idempotentHashUpsert_ac9"
+  },
+  {
+    "id": "AC-10",
+    "fr_ref": "FR-10",
+    "layer": "backend",
+    "description": "POST /api/v1/auth/login with body {\"username\":\"user\",\"password\":\"1234\"} returns HTTP 200 with JSON body whose top-level keys are exactly {token, userId, role, name}, no extras and no missing. token is a valid HS256 JWT verifiable by the live JwtService bean; userId=\"user\"; role=\"USER\"; name=\"일반사용자\". Same shape for username=\"admin\" with role=\"ADMIN\" and name=\"관리자\".",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/AuthControllerTest.java#loginHappyPath_ac10"
+  },
+  {
+    "id": "AC-11",
+    "fr_ref": "FR-10",
+    "layer": "backend",
+    "description": "POST /api/v1/auth/login with body {\"username\":\"user\",\"password\":\"wrong\"} returns HTTP 401 with errorCode='INVALID_CREDENTIALS' and the original Korean message. Same response for username=\"nonexistent\". The timing-safe path (FR-10) means both branches still invoke passwordEncoder.matches exactly once — verified by spying on the BCryptPasswordEncoder bean.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/AuthControllerTest.java#invalidCredentialsAndUnknownUserSameResponse_ac11"
+  },
+  {
+    "id": "AC-12",
+    "fr_ref": "FR-10",
+    "layer": "backend",
+    "description": "POST /api/v1/auth/login with body {} (or {\"username\":\"\",\"password\":\"\"}) returns HTTP 400 with errorCode='MISSING_FIELDS'. Existing test behavior preserved (no regression vs current AuthControllerTest expectations).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/AuthControllerTest.java#missingFields_ac12"
+  },
+  {
+    "id": "AC-13",
+    "fr_ref": "FR-11,NFR security",
+    "layer": "backend",
+    "description": "JwtAuthFilter rejects requests to non-login /api/v1/** endpoints when the Authorization header is missing, present without 'Bearer ' prefix, present with an expired token, or present with a token signed by a different secret. Every rejection is HTTP 401 with errorCode='INVALID_TOKEN' and a UUIDv4 correlationId in the shared ErrorResponse envelope. SLF4J capture verifies no log line contains the full token (token is masked to first 8 chars + '...').",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/JwtAuthFilterTest.java#bearerValidationAndMaskedLogging_ac13"
+  },
+  {
+    "id": "AC-14",
+    "fr_ref": "FR-11,FR-12,D-1",
+    "layer": "backend",
+    "description": "When a request includes a valid Authorization: Bearer <jwt> AND an X-User-Id header whose value does NOT equal the JWT sub claim, JwtAuthFilter responds HTTP 401 with errorCode='USER_ID_MISMATCH' (NOT 'INVALID_TOKEN'). When X-User-Id is absent entirely on a non-login endpoint, the response is 401 INVALID_TOKEN (per FR-11, the filter does not differentiate). When X-User-Id equals JWT sub, the request proceeds to the controller as today.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/JwtAuthFilterTest.java#userIdMismatch_ac14"
+  },
+  {
+    "id": "AC-15",
+    "fr_ref": "FR-11",
+    "layer": "backend",
+    "description": "POST /api/v1/auth/login bypasses JwtAuthFilter entirely: a request to /api/v1/auth/login with no Authorization header and no X-User-Id header receives the normal 200/400/401 response from AuthController (not the filter's 401 INVALID_TOKEN). Verified by JwtAuthFilterTest sending login requests with no auth headers and asserting a non-401 status for the missing-fields branch (400) and a successful login (200).",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/JwtAuthFilterTest.java#loginEndpointBypassesFilter_ac15"
+  },
+  {
+    "id": "AC-16",
+    "fr_ref": "FR-12",
+    "layer": "backend",
+    "description": "com.authenticself.auth.AuthErrorCode enum contains exactly the values {MISSING_FIELDS, INVALID_CREDENTIALS, INVALID_TOKEN, USER_ID_MISMATCH}. INVALID_TOKEN and USER_ID_MISMATCH both have httpStatus=HttpStatus.UNAUTHORIZED. MISSING_FIELDS=400, INVALID_CREDENTIALS=401 (byte-identical to current behavior). Each new constant has a non-null Korean defaultMessage.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/auth/AuthErrorCode.java"
+  },
+  {
+    "id": "AC-CORS-1",
+    "fr_ref": "FR-CORS-1",
+    "layer": "backend",
+    "description": "A class com.authenticself.web.CorsConfig (or sibling package) exists, is annotated @Configuration, implements WebMvcConfigurer, and overrides addCorsMappings(CorsRegistry) to register /api/** with allowedOrigins read from @Value(\"${app.cors.allowed-origins}\") (or @ConfigurationProperties equivalent). allowedMethods include at minimum GET, POST, PUT, PATCH, DELETE, OPTIONS. allowedHeaders include X-User-Id, Authorization, Content-Type, Accept. allowCredentials=true. maxAge=3600.",
+    "verify_by": "static",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/web/CorsConfig.java"
+  },
+  {
+    "id": "AC-CORS-2",
+    "fr_ref": "FR-CORS-2",
+    "layer": "backend",
+    "description": "grep -nE '@CrossOrigin' src/backend/src/main/java/com/authenticself/ returns ZERO matches. The four files (SpaceController.java, WishlistController.java, AdminController.java, AuthController.java) no longer contain the @CrossOrigin annotation. Imports of org.springframework.web.bind.annotation.CrossOrigin and (where it becomes unused) RequestMethod are also removed.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/main/java/com/authenticself/"
+  },
+  {
+    "id": "AC-CORS-3",
+    "fr_ref": "FR-CORS-3",
+    "layer": "backend",
+    "description": "MockMvc test issues OPTIONS /api/v1/spaces/photo with Origin: http://localhost:8082 (a listed dev origin) and Access-Control-Request-Method: POST and asserts (a) HTTP status is 200, (b) Access-Control-Allow-Origin response header equals 'http://localhost:8082', (c) Access-Control-Allow-Methods includes 'POST', (d) Access-Control-Allow-Headers includes 'Authorization' and 'X-User-Id'. A second case sends OPTIONS with Origin: https://evil.example.com (unlisted) and asserts EITHER HTTP status 403 OR (200 with NO Access-Control-Allow-Origin header). Both branches in a single parameterized test.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/web/CorsConfigTest.java#preflightAllowAndDeny_acCors3"
+  },
+  {
+    "id": "AC-SEC-1",
+    "fr_ref": "FR-SEC-1",
+    "layer": "backend",
+    "description": "application.yml uses ${VAR:default} or ${VAR} placeholder syntax for every key in: spring.datasource.url, spring.datasource.username, spring.datasource.password, app.ai.base-url, app.storage.local.root, app.auth.jwt.secret, app.cors.allowed-origins. Verified by grep that each of those property keys appears on a line whose value side starts with '${' and ends with '}'.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/main/resources/application.yml"
+  },
+  {
+    "id": "AC-SEC-2",
+    "fr_ref": "FR-SEC-2",
+    "layer": "backend",
+    "description": "grep -nE '^\\s*password\\s*:\\s*[^$]' src/backend/src/main/resources/application.yml returns zero matches (no literal password value outside a ${} placeholder). grep for the literal substring 'rootroot' returns matches ONLY inside a ${DB_PASSWORD:rootroot} placeholder if a dev default is used; recommendation is no dev default for DB_PASSWORD (current state — passing). The literal token 'authenticself-jwt-secret' or any obvious dev secret MUST NOT appear anywhere in application.yml.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/main/resources/application.yml"
+  },
+  {
+    "id": "AC-SEC-3",
+    "fr_ref": "FR-SEC-3",
+    "layer": "backend",
+    "description": "A @SpringBootTest with the JWT secret environment variable explicitly unset (or set to a 16-byte value) fails to start the application context. The thrown exception's chain contains an IllegalStateException whose getMessage() contains both the literal substring 'APP_AUTH_JWT_SECRET' and the literal substring 'docs/deployment/env.md'. Failure occurs during JwtService bean construction, before any HTTP request can be served.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/JwtSecretStartupFailureTest.java#missingOrShortSecretFailsBoot_acSec3"
+  },
+  {
+    "id": "AC-SEC-4",
+    "fr_ref": "FR-SEC-4",
+    "layer": "contract",
+    "description": "docs/deployment/env.md exists and contains a markdown table whose header row includes the columns 'Env Var', 'Purpose', 'Example', 'Has Dev Default?'. The table includes one row each for: DB_URL, DB_USER, DB_PASSWORD, APP_AI_BASE_URL, APP_STORAGE_LOCAL_ROOT, APP_AUTH_JWT_SECRET, APP_CORS_ALLOWED_ORIGINS. The file explicitly states that APP_AUTH_JWT_SECRET and DB_PASSWORD have no dev default and prod deploys without them will fail to start.",
+    "verify_by": "grep",
+    "target_file_or_test": "docs/deployment/env.md"
+  },
+  {
+    "id": "AC-BC-1",
+    "fr_ref": "FR-BC-1",
+    "layer": "mobile",
+    "description": "git diff against the merge-base on main shows ZERO changes to src/mobile/src/auth/AuthContext.tsx and src/mobile/src/api/auth.ts. The login request body shape (POST /api/v1/auth/login -> {username, password}) and response body shape ({token, userId, role, name}) are byte-identical to pre-task behavior.",
+    "verify_by": "static",
+    "target_file_or_test": "git diff src/mobile/src/auth/AuthContext.tsx src/mobile/src/api/auth.ts"
+  },
+  {
+    "id": "AC-BC-2",
+    "fr_ref": "FR-BC-2",
+    "layer": "mobile",
+    "description": "All currently-passing mobile jest tests (run via `npm test` in src/mobile/) remain green. The total passing-test count after this task is >= the pre-task count of 94. Any test file change is limited to either (a) updating a login-response mock to use a JWT-shaped string (or any non-empty string), or (b) adding an Authorization header mock for non-login API tests if such a test already asserts on outgoing headers. No test assertion is deleted or weakened.",
+    "verify_by": "test",
+    "target_file_or_test": "src/mobile/ (npm test)"
+  },
+  {
+    "id": "AC-BC-3",
+    "fr_ref": "FR-BC-3",
+    "layer": "backend",
+    "description": "All currently-passing backend tests remain green under ./gradlew test -PskipTestcontainers. The total passing-test count after this task is >= the pre-task count of 141 plus the new tests added by this task. A new test helper com.authenticself.test.AuthTestHelper exists with methods String issueTokenFor(String userId, String role) and Map<String,String> authHeaders(String userId, String role) — verified by class existence + reflective method signature check.",
+    "verify_by": "test",
+    "target_file_or_test": "src/backend/ (./gradlew test -PskipTestcontainers)"
+  },
+  {
+    "id": "AC-BC-4",
+    "fr_ref": "FR-BC-3",
+    "layer": "backend",
+    "description": "Every pre-existing backend test that sent X-User-Id to a /api/v1/{spaces,wishlist,admin}/** endpoint has been updated to also include an Authorization: Bearer <jwt> header (via AuthTestHelper.authHeaders or equivalent). Verified by grep: every test file under src/backend/src/test/ that contains the literal 'X-User-Id' AND issues a non-login request also contains the literal 'Authorization' or the literal 'authHeaders'. design.md must enumerate the touched test files.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/test/"
+  },
+  {
+    "id": "AC-17",
+    "fr_ref": "FR-11",
+    "layer": "backend",
+    "description": "An integration test issues GET /api/v1/spaces/{roomId} with a valid Authorization: Bearer <jwt for userId=user, role=USER> and X-User-Id: user, against a seeded DB containing that space. Response is HTTP 200 (or the same status the controller would return for that roomId under the prior behavior) — i.e. the filter does not break the happy path. A parallel test omits the Authorization header and asserts 401 INVALID_TOKEN.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/JwtAuthFilterIntegrationTest.java#authorizedRequestPasses_ac17"
+  },
+  {
+    "id": "AC-18",
+    "fr_ref": "FR-10,NFR logging",
+    "layer": "backend",
+    "description": "Under SLF4J log capture, AuthService.login(...) emits exactly one INFO line per successful login (matching op=login userId=\\S+ result=success) and exactly one WARN line per failed login (matching op=login userId=\\S+ result=failure errorCode=(INVALID_CREDENTIALS|MISSING_FIELDS)). No captured log line contains the literal '1234', the request password, the issued JWT, or any BCrypt hash bytes.",
+    "verify_by": "integration",
+    "target_file_or_test": "src/backend/src/test/java/com/authenticself/auth/AuthServiceLoggingTest.java#noSecretsInLogs_ac18"
+  },
+  {
+    "id": "AC-19",
+    "fr_ref": "FR-7",
+    "layer": "db",
+    "description": "V1..V10 migration files are byte-for-byte unmodified by this task. git diff against main across V1__init_schema.sql, V2__add_spaces_status_and_photo.sql, V3__add_preferred_style.sql, V4__extend_furniture_catalog.sql, V5__seed_furniture_catalog.sql, V6__extend_wishlist_timestamps.sql, V7__add_users_role.sql, V8__add_furniture_model_url.sql, V9__seed_curated_assets.sql, V10__furniture_similar_cache.sql shows zero changes. Only the new V11__add_users_password_hash.sql is added.",
+    "verify_by": "static",
+    "target_file_or_test": "git diff against main across V1..V10 + presence of V11"
+  },
+  {
+    "id": "AC-20",
+    "fr_ref": "FR-CORS-1,FR-SEC-1",
+    "layer": "backend",
+    "description": "application.yml contains the new keys app.cors.allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:8082,http://localhost:8081} and app.auth.jwt.secret: ${APP_AUTH_JWT_SECRET} (no default — fail-fast per FR-SEC-3). Grep-verifiable as exact substring presence.",
+    "verify_by": "grep",
+    "target_file_or_test": "src/backend/src/main/resources/application.yml"
+  }
+]

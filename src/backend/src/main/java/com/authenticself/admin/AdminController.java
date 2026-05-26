@@ -6,11 +6,9 @@ import com.authenticself.admin.dto.SalesTileResponse;
 import com.authenticself.admin.dto.UsersTileResponse;
 import com.authenticself.admin.dto.WishlistTileResponse;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -36,9 +34,6 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1/admin")
-@CrossOrigin(origins = "*", allowedHeaders = "*", methods = {
-        RequestMethod.GET, RequestMethod.OPTIONS
-})
 public class AdminController {
 
     private final AdminAuthorizer      authorizer;
