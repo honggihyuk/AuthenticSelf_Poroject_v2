@@ -284,6 +284,11 @@ async def analyze_space(
         mainColor=color_result.mainColor,
         confidence=aggregate_confidence,
         processingMs=processing_ms,
+        # UC-ML-PERSIST FR-3 — surface the detections + image dims the
+        # dimensions analyzer already produced (no extra YOLO inference).
+        imageWidth=dim_result.imageWidth,
+        imageHeight=dim_result.imageHeight,
+        detections=dim_result.detections,
     )
     log.info(
         "analyze/space ok roomId=%s processingMs=%d dimensions=%sx%sx%sm mainColor=%s confidence=%.2f",

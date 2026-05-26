@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -255,11 +256,12 @@ class RecommendationOrchestratorTest {
     }
 
     // -----------------------------------------------------------------
-    // AC-38 — detectedObjects always []
+    // AC-12 (was AC-38) — NULL ai_detections → detectedObjects []
     // -----------------------------------------------------------------
     @Test
-    @DisplayName("AC-38: Spring sends detectedObjects=[]")
-    void ac38_emptyDetectedObjects() {
+    @DisplayName("AC-12: NULL ai_detections → Spring sends detectedObjects=[] (backward-compatible)")
+    void ac12_nullDetectionsAreEmptyList() {
+        // analyzedRoom() leaves ai_detections NULL by default.
         when(spaces.findById("r1"))
                 .thenReturn(Optional.of(analyzedRoom("r1", "u1", PreferredStyle.MODERN)));
         when(furniture.findAll()).thenReturn(List.of(desk("f_desk_001")));
@@ -276,6 +278,82 @@ class RecommendationOrchestratorTest {
         assertThat(req.space().detectedObjects()).isEmpty();
         assertThat(req.topNPerCategory()).isEqualTo(3);
         assertThat(req.preferredStyle()).isEqualTo("MODERN");
+    }
+
+    // -----------------------------------------------------------------
+    // AC-8 — non-empty persisted detections reach Python (NOT emptyList())
+    // -----------------------------------------------------------------
+    @Test
+    @DisplayName("AC-8: persisted detections → detectedObjects non-empty with valid type/bboxNorm/confidence")
+    void ac8_persistedDetectionsReachPython() {
+        Space room = analyzedRoom("r1", "u1", PreferredStyle.MODERN);
+        room.setAiDetections(
+                "{\"imageWidth\":1280,\"imageHeight\":960,\"detections\":["
+                        + "{\"label\":\"chair\",\"bbox\":[128.0,96.0,256.0,192.0],\"confidence\":0.9}]}");
+        when(spaces.findById("r1")).thenReturn(Optional.of(room));
+        when(furniture.findAll()).thenReturn(List.of(desk("f_desk_001")));
+        when(client.callRecommend(any())).thenReturn(emptyOkResponse());
+
+        orch.recommend("r1", "u1", 3);
+
+        ArgumentCaptor<RecommendationRequest> captor =
+                ArgumentCaptor.forClass(RecommendationRequest.class);
+        verify(client).callRecommend(captor.capture());
+        var dets = captor.getValue().space().detectedObjects();
+
+        assertThat(dets).hasSize(1);
+        var d = dets.get(0);
+        assertThat(d.type()).isEqualTo("chair");
+        assertThat(d.bboxNorm()).hasSize(4);
+        assertThat(d.bboxNorm()).allSatisfy(v -> assertThat(v).isBetween(0.0, 1.0));
+        assertThat(d.confidence()).isBetween(0.0, 1.0);
+    }
+
+    // -----------------------------------------------------------------
+    // AC-9 — transform correctness (buildRequest, exact values)
+    // -----------------------------------------------------------------
+    @Test
+    @DisplayName("AC-9: chair bbox[128,96,256,192]@1280x960 → bboxNorm[0.1,0.1,0.2,0.2]")
+    void ac9_transformCorrectness() {
+        String envelope =
+                "{\"imageWidth\":1280,\"imageHeight\":960,\"detections\":["
+                        + "{\"label\":\"chair\",\"bbox\":[128.0,96.0,256.0,192.0],\"confidence\":0.9}]}";
+
+        RecommendationRequest req = RecommendationOrchestrator.buildRequest(
+                "r1", "u1", "MODERN", "MODERN", "#E8D9B0",
+                new double[] { 4.0, 4.0, 2.4 }, envelope,
+                List.of(), 3);
+
+        var dets = req.space().detectedObjects();
+        assertThat(dets).hasSize(1);
+        var d = dets.get(0);
+        assertThat(d.type()).isEqualTo("chair");
+        assertThat(d.bboxNorm().get(0)).isCloseTo(0.1, within(1e-3));
+        assertThat(d.bboxNorm().get(1)).isCloseTo(0.1, within(1e-3));
+        assertThat(d.bboxNorm().get(2)).isCloseTo(0.2, within(1e-3));
+        assertThat(d.bboxNorm().get(3)).isCloseTo(0.2, within(1e-3));
+        assertThat(d.confidence()).isCloseTo(0.9, within(1e-3));
+    }
+
+    // -----------------------------------------------------------------
+    // AC-13 — malformed JSON degrades to empty list (no crash)
+    // -----------------------------------------------------------------
+    @Test
+    @DisplayName("AC-13: malformed ai_detections JSON degrades to detectedObjects=[] (no failure)")
+    void ac13_malformedJsonDegrades() {
+        Space room = analyzedRoom("r1", "u1", PreferredStyle.MODERN);
+        room.setAiDetections("{ this is not valid json ]]");
+        when(spaces.findById("r1")).thenReturn(Optional.of(room));
+        when(furniture.findAll()).thenReturn(List.of(desk("f_desk_001")));
+        when(client.callRecommend(any())).thenReturn(emptyOkResponse());
+
+        var out = orch.recommend("r1", "u1", 3);
+
+        assertThat(out.response().status()).isEqualTo("OK");
+        ArgumentCaptor<RecommendationRequest> captor =
+                ArgumentCaptor.forClass(RecommendationRequest.class);
+        verify(client).callRecommend(captor.capture());
+        assertThat(captor.getValue().space().detectedObjects()).isEmpty();
     }
 
     // -----------------------------------------------------------------

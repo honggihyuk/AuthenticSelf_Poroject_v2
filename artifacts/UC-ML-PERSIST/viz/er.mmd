@@ -1,0 +1,49 @@
+%% UC-ML-PERSIST — ER fragment: the new spaces.ai_detections column in context
+%% Legend (traceability):
+%%   FR-4 : V12__add_spaces_ai_detections.sql adds ai_detections JSON NULL (AFTER analysis_date)
+%%   FR-5 : Space.java maps it as String aiDetections, columnDefinition="JSON", nullable
+%%   AC-1 : column exists, JSON type, nullable
+%%   AC-2 : pre-V12 rows keep ai_detections = NULL (no backfill/DEFAULT)
+%%
+%% Cardinalities preserved from PRD §7. Only spaces.ai_detections is NEW (marked << NEW V12 >>).
+%% Columns shown match src/.../domain/Space.java; non-touched tables shown abbreviated for context only.
+
+erDiagram
+    USERS ||--o{ SPACES : "owns (1 — 0..*)"
+    USERS ||--o{ WISHLIST : "owns (1 — 0..*)"
+    WISHLIST }o--|| FURNITURE : "references (0..* — 1)"
+
+    SPACES {
+        string room_id PK "64"
+        string user_id FK "64, NOT NULL"
+        string photo_url "512, NOT NULL"
+        string original_filename "255"
+        string content_type "64, NOT NULL"
+        long file_size_bytes "NOT NULL"
+        enum status "PENDING_ANALYSIS | ANALYZED | FAILED"
+        datetime uploaded_at "NOT NULL"
+        string dimensions "100, nullable e.g. 3.6x4.2x2.4m"
+        string main_color "32, nullable"
+        string style "64, nullable"
+        string preferred_style "VARCHAR(32), nullable"
+        datetime analysis_date "nullable"
+        json ai_detections "NULL — NEW V12 envelope {imageWidth,imageHeight,detections[]}"
+    }
+
+    USERS {
+        string user_id PK
+        string password_hash "V11"
+    }
+
+    FURNITURE {
+        string furniture_id PK
+        string type "desk | bed | chair | lighting"
+        string name
+    }
+
+    WISHLIST {
+        string wishlist_id PK
+        string user_id FK
+        string furniture_id FK
+        enum status "ACTIVE | PURCHASED"
+    }

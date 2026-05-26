@@ -252,7 +252,10 @@ public class SpaceController {
                 styleConfidence,
                 space.getPreferredStyle(),
                 space.getAnalysisDate(),
-                space.getUploadedAt()
+                space.getUploadedAt(),
+                // UC-ML-PERSIST FR-11 — parse the persisted envelope; null
+                // (NULL column or malformed JSON) renders as no boxes (FR-12).
+                com.authenticself.ai.AiDetectionsCodec.parseEnvelope(space.getAiDetections())
         );
     }
 }

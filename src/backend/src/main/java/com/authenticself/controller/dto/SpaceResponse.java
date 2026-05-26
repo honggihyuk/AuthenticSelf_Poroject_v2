@@ -1,5 +1,6 @@
 package com.authenticself.controller.dto;
 
+import com.authenticself.ai.dto.AiDetectionsEnvelope;
 import com.authenticself.space.PreferredStyle;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -21,19 +22,25 @@ import java.time.LocalDateTime;
  *       {@code analysisDate}.</li>
  * </ul>
  *
- * {@code @JsonInclude(NON_ABSENT)} keeps null fields present in the JSON
+ * {@code @JsonInclude(ALWAYS)} keeps null fields present in the JSON
  * as {@code null} (AC-19 asserts {@code preferredStyle==null} literally).
  */
 @JsonInclude(JsonInclude.Include.ALWAYS)
 public record SpaceResponse(
-        String         roomId,
-        String         status,
-        String         dimensions,
-        String         mainColor,
-        String         style,
-        Double         styleConfidence,
-        PreferredStyle preferredStyle,
-        LocalDateTime  analysisDate,
-        LocalDateTime  uploadedAt
+        String              roomId,
+        String              status,
+        String              dimensions,
+        String              mainColor,
+        String              style,
+        Double              styleConfidence,
+        PreferredStyle      preferredStyle,
+        LocalDateTime       analysisDate,
+        LocalDateTime       uploadedAt,
+        // UC-ML-PERSIST FR-11 — persisted YOLO detections envelope
+        // ({imageWidth, imageHeight, detections[]}); null when ai_detections
+        // is NULL or could not be parsed. The admin Space-detail debug view
+        // renders bounding boxes from this; the user-scoped endpoint already
+        // gates access to the row owner (no cross-user leak).
+        AiDetectionsEnvelope aiDetections
 ) {
 }

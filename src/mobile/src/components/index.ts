@@ -10,3 +10,5 @@ export { Price } from './Price';
 export type { PriceProps } from './Price';
 export { ProductCard } from './ProductCard';
 export type { ProductCardProps } from './ProductCard';
+export { DetectionOverlay } from './DetectionOverlay';
+export type { DetectionOverlayProps } from './DetectionOverlay';

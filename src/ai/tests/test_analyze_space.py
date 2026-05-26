@@ -73,6 +73,20 @@ def test_analyze_happy_path(client, sample_jpeg):
     assert 0.0 <= data["confidence"] <= 1.0
     assert data["processingMs"] > 0
 
+    # UC-ML-PERSIST AC-3 / AC-5 — detections + image dims are part of the
+    # success contract. The synthetic fixture may contain zero detectable
+    # furniture, so we assert the SHAPE (present, correctly typed) here and
+    # leave element-content assertions to the analyzer unit test.
+    assert isinstance(data["imageWidth"], int) and data["imageWidth"] >= 1
+    assert isinstance(data["imageHeight"], int) and data["imageHeight"] >= 1
+    assert "detections" in data
+    assert isinstance(data["detections"], list)
+    for det in data["detections"]:
+        assert isinstance(det["label"], str)
+        assert len(det["bbox"]) == 4
+        assert all(isinstance(n, (int, float)) for n in det["bbox"])
+        assert 0.0 <= det["confidence"] <= 1.0
+
 
 def test_analyze_is_deterministic(client, sample_jpeg):
     body = {"roomId": "determ", "photoUrl": sample_jpeg.as_uri()}

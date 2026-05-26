@@ -32,6 +32,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from app.errors import ImageNotFoundError, ImageReadError
+from app.schemas import DetectedObject
 from .base import SpaceAnalysisResult
 from .depth import DepthEstimator, default_depth_estimator
 from .yolo_detector import Detection, YOLODetector, default_yolo_detector
@@ -127,9 +128,22 @@ class DimensionsEstimator:
                 ref.label, ref.confidence, real_w, px_w, mpp_at_ref, width_m, length_m,
             )
 
+        # UC-ML-PERSIST FR-2 — surface the detections already produced by the
+        # single ``self._yolo.detect(...)` call above (line 98). NO second
+        # inference: we only re-shape the existing ``det.detections`` into the
+        # response ``DetectedObject`` schema and carry the image dims off the
+        # same ``DetectionResult`` so the backend can normalize bboxes later.
+        detections = [
+            DetectedObject(label=d.label, bbox=d.bbox, confidence=d.confidence)
+            for d in det.detections
+        ]
+
         return SpaceAnalysisResult(
             widthM=round(width_m, 2),
             lengthM=round(length_m, 2),
             heightM=_FIXED_HEIGHT_M,
             confidence=round(confidence, 2),
+            detections=detections,
+            imageWidth=det.image_width,
+            imageHeight=det.image_height,
         )

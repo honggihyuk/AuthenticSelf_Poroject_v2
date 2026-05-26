@@ -1,0 +1,48 @@
+%% UC-ML-PERSIST — data-transform flow: the two-contract split + one transform
+%% Legend (traceability):
+%%   FR-1/FR-3 : AI/persisted side shape {label, bbox absolute px (xyxy), confidence} + envelope {imageWidth,imageHeight}
+%%   FR-7      : envelope serialized into spaces.ai_detections (AiDetectionsCodec.toEnvelopeJson)
+%%   FR-9      : transform — normalize bbox to 0..1 (clamp) + COCO label -> catalog type
+%%   FR-13     : NULL / malformed JSON / bad bbox -> [] (WARN), never fails the request
+%%   AC-9      : {chair,[128,96,256,192],0.9} @ W=1280,H=960 -> {chair,[0.1,0.1,0.2,0.2],0.9}
+%%   AC-10     : recommender side feeds score_object_conflict (0.20 penalty, conf>=0.5)
+%%
+%% The single transform lives in AiDetectionsCodec (Spring). desk/lighting have NO COCO class -> unmapped gap (documented).
+
+flowchart LR
+    subgraph SRC["AI / persisted side (absolute px) — FR-1/FR-3/FR-7"]
+        direction TB
+        A1["DetectedObject<br/>label: str (COCO)<br/>bbox: [x1,y1,x2,y2] absolute px<br/>confidence: float 0..1"]
+        A2["Envelope dims<br/>imageWidth: int<br/>imageHeight: int"]
+        A3[("spaces.ai_detections JSON<br/>{imageWidth, imageHeight, detections[]}")]
+        A1 --> A3
+        A2 --> A3
+    end
+
+    subgraph XF["AiDetectionsCodec.toDetectedObjects() — ONE transform — FR-9/FR-13"]
+        direction TB
+        T0{"json null / blank<br/>or malformed?"}
+        T1["normalize bbox<br/>bboxNorm = [x1/W, y1/H, x2/W, y2/H]<br/>each clamp01(0..1)"]
+        T2["label -> type (LABEL_TO_TYPE)<br/>chair -> chair<br/>bed -> bed<br/>others -> raw label (pass-through)"]
+        T3["per-detection guard<br/>bbox.size != 4 or label null<br/>-> skip (WARN)"]
+        T0 -- "yes" --> EMPTY["return [] (WARN) — FR-13"]
+        T0 -- "no" --> T3
+        T3 --> T1 --> T2
+    end
+
+    subgraph GAP["Documented unmapped gap (NOT fixed with ML)"]
+        G1["desk / lighting<br/>have NO COCO class<br/>=> no detection ever maps to them"]
+    end
+
+    subgraph DST["Recommender side (normalized) — RecommendationRequest.DetectedObject"]
+        direction TB
+        D1["DetectedObject<br/>type: str (catalog or raw)<br/>bboxNorm: [4 floats 0..1]<br/>confidence: float 0..1"]
+        D2["Python score_object_conflict()<br/>det.type == item.type & conf >= 0.5<br/>-> factor 0.20 (else 1.00) — AC-10"]
+        D1 --> D2
+    end
+
+    A3 --> T0
+    T2 --> D1
+    T2 -. "tv / couch / potted plant<br/>never equal a catalog item.type" .-> G1
+    G1 -. "harmless pass-through" .-> D1
+    EMPTY --> D1

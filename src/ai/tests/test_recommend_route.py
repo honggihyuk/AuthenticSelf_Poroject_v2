@@ -345,3 +345,39 @@ def test_top1_style_match_invariant(client):
             top = recs[cat][0]
             assert top["scoreBreakdown"]["styleMatch"] >= 0.50, \
                 f"top-1 of {cat} must have styleMatch >= 0.50 (got {top!r})"
+
+
+# --------------------------------------------------------------------------
+# UC-ML-PERSIST AC-10 — a real chair detection drives the conflict penalty
+# --------------------------------------------------------------------------
+
+
+def test_chair_detection_drives_object_conflict_ac10(client):
+    """AC-10 — when a chair detection (confidence >= 0.5) is sent, the chair
+    catalog item's objectConflict factor is the penalty (0.20), not 1.00 —
+    proving the persisted detection signal reaches score_object_conflict.
+    """
+    req = _base_request()
+    req["space"]["detectedObjects"] = [
+        {"type": "chair", "bboxNorm": [0.1, 0.1, 0.2, 0.2], "confidence": 0.9}
+    ]
+    r = client.post("/recommend/furniture", json=req)
+    assert r.status_code == 200, r.text
+    chairs = r.json()["recommendations"]["chair"]
+    assert chairs, "expected at least one chair recommendation"
+    for c in chairs:
+        assert c["scoreBreakdown"]["objectConflict"] == 0.20, \
+            f"chair conflict factor should be the 0.20 penalty (got {c!r})"
+
+
+def test_no_detection_no_conflict_penalty_ac10_baseline(client):
+    """AC-10 baseline — with no detections (today's behaviour), the chair
+    item's objectConflict stays 1.00."""
+    req = _base_request()
+    req["space"]["detectedObjects"] = []
+    r = client.post("/recommend/furniture", json=req)
+    assert r.status_code == 200
+    chairs = r.json()["recommendations"]["chair"]
+    assert chairs
+    for c in chairs:
+        assert c["scoreBreakdown"]["objectConflict"] == 1.00

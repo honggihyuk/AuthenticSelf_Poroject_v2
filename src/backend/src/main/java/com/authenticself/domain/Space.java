@@ -87,6 +87,17 @@ public class Space {
     @Column(name = "analysis_date")
     private LocalDateTime analysisDate;
 
+    // UC-ML-PERSIST FR-5 — persisted YOLO detections envelope as raw JSON text
+    // (V12 migration adds the column as JSON NULL). Stored as a self-describing
+    // envelope {imageWidth, imageHeight, detections:[{label,bbox,confidence}]}
+    // so the recommender transform can normalize bboxes without re-reading the
+    // image. NULL means "no persisted detections" (pre-migration rows, FAILED
+    // analyses, transport failures, or a successful analysis that found
+    // nothing). columnDefinition = "JSON" pins the JDBC type so Hibernate's
+    // ddl-auto=validate matches the native MySQL JSON column.
+    @Column(name = "ai_detections", nullable = true, columnDefinition = "JSON")
+    private String aiDetections;
+
     // ---------- accessors ------------------------------------------------
     public String getRoomId()           { return roomId; }
     public void   setRoomId(String v)   { this.roomId = v; }
@@ -126,4 +137,7 @@ public class Space {
 
     public LocalDateTime getAnalysisDate()         { return analysisDate; }
     public void          setAnalysisDate(LocalDateTime v) { this.analysisDate = v; }
+
+    public String getAiDetections()         { return aiDetections; }
+    public void   setAiDetections(String v) { this.aiDetections = v; }
 }

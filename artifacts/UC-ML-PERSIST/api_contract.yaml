@@ -1,0 +1,177 @@
+openapi: 3.0.3
+info:
+  title: AuthenticSelf — UC-ML-PERSIST contract additions
+  version: 1.0.0
+  description: >
+    Additive contract changes for UC-ML-PERSIST. No new endpoints are
+    introduced — only three additive response fields on the existing AI
+    POST /analyze/space body, and one additive field on the existing Spring
+    GET /api/v1/spaces/{roomId} body. The internal recommender request
+    (Spring → Python POST /recommend/furniture) is unchanged in shape; only
+    the previously-empty detectedObjects list is now populated. All additions
+    are backward-compatible (Spring keeps @JsonIgnoreProperties(ignoreUnknown);
+    new Spring field is nullable).
+
+paths:
+  /analyze/space:
+    post:
+      summary: Space analysis (AI service, FastAPI) — extended with detections
+      operationId: analyzeSpace
+      tags: [ai]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpaceAnalyzeRequest'
+      responses:
+        '200':
+          description: Analysis succeeded (now includes detections + image dims)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpaceAnalysisResponse'
+        '422':
+          description: Image not found / read failed / invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/spaces/{roomId}:
+    get:
+      summary: Space detail (Spring) — extended with aiDetections envelope
+      operationId: getSpace
+      tags: [spaces]
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 64 }
+        - name: X-User-Id
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Space row (owner-scoped). Admin debug view reads aiDetections.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpaceResponse'
+        '403': { description: Not the row owner }
+        '404': { description: Unknown roomId }
+
+components:
+  schemas:
+    SpaceAnalyzeRequest:
+      type: object
+      required: [roomId, photoUrl]
+      properties:
+        roomId:   { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }
+        photoUrl: { type: string, pattern: '^file://.+' }
+
+    # ---- AI POST /analyze/space success body (FR-3) ----
+    SpaceAnalysisResponse:
+      type: object
+      required: [roomId, status, dimensions, mainColor, confidence, processingMs, imageWidth, imageHeight, detections]
+      properties:
+        roomId:       { type: string }
+        status:       { type: string, enum: [OK] }
+        dimensions:   { $ref: '#/components/schemas/Dimensions' }
+        mainColor:    { type: string, pattern: '^#[0-9A-F]{6}$' }
+        confidence:   { type: number, format: float, minimum: 0, maximum: 1 }
+        processingMs: { type: integer, minimum: 0 }
+        # --- UC-ML-PERSIST additions ---
+        imageWidth:   { type: integer, minimum: 1, description: 'Source image width in px (from the existing YOLO DetectionResult — no extra inference).' }
+        imageHeight:  { type: integer, minimum: 1, description: 'Source image height in px.' }
+        detections:
+          type: array
+          description: 'YOLO detections already computed by the dimensions analyzer; [] when none found.'
+          items: { $ref: '#/components/schemas/DetectedObject' }
+
+    Dimensions:
+      type: object
+      required: [widthM, lengthM, heightM, areaM2]
+      properties:
+        widthM:  { type: number, format: float, minimum: 0 }
+        lengthM: { type: number, format: float, minimum: 0 }
+        heightM: { type: number, format: float, minimum: 0 }
+        areaM2:  { type: number, format: float, minimum: 0 }
+
+    DetectedObject:
+      type: object
+      description: 'Reuses the existing /analyze/objects DetectedObject shape verbatim.'
+      required: [label, bbox, confidence]
+      properties:
+        label: { type: string, example: chair }
+        bbox:
+          type: array
+          minItems: 4
+          maxItems: 4
+          description: '[x1, y1, x2, y2] absolute pixels (xyxy).'
+          items: { type: number, format: float }
+        confidence: { type: number, format: float, minimum: 0, maximum: 1 }
+
+    # ---- Spring GET /api/v1/spaces/{roomId} body (FR-11) ----
+    SpaceResponse:
+      type: object
+      properties:
+        roomId:          { type: string }
+        status:          { type: string, enum: [PENDING_ANALYSIS, ANALYZED, FAILED] }
+        dimensions:      { type: string, nullable: true, example: '3.6x4.2x2.4m' }
+        mainColor:       { type: string, nullable: true }
+        style:           { type: string, nullable: true }
+        styleConfidence: { type: number, format: float, nullable: true }
+        preferredStyle:  { type: string, nullable: true }
+        analysisDate:    { type: string, format: date-time, nullable: true }
+        uploadedAt:      { type: string, format: date-time, nullable: true }
+        # --- UC-ML-PERSIST addition ---
+        aiDetections:
+          allOf:
+            - $ref: '#/components/schemas/AiDetectionsEnvelope'
+          nullable: true
+          description: >
+            Persisted YOLO detections envelope. NULL for pre-migration rows,
+            FAILED analyses, transport failures, zero-object analyses, or
+            unparseable JSON. The admin Space-detail debug view renders boxes
+            from this; NULL renders the photo with an empty-state hint.
+
+    # ---- Persisted envelope shape (spaces.ai_detections column + recommender source) ----
+    AiDetectionsEnvelope:
+      type: object
+      required: [imageWidth, imageHeight, detections]
+      properties:
+        imageWidth:  { type: integer, minimum: 1 }
+        imageHeight: { type: integer, minimum: 1 }
+        detections:
+          type: array
+          items: { $ref: '#/components/schemas/DetectedObject' }
+
+    # ---- Internal recommender DTO (Spring → Python), shape UNCHANGED ----
+    # Documented here for reference: FR-9 now POPULATES this list (was always []).
+    RecoDetectedObject:
+      type: object
+      required: [type, bboxNorm, confidence]
+      properties:
+        type:
+          type: string
+          description: >
+            COCO label mapped to a catalog type. chair→chair, bed→bed; other
+            COCO labels pass through raw (never match a catalog item.type).
+            No COCO class maps to desk/lighting (documented out-of-scope gap).
+        bboxNorm:
+          type: array
+          minItems: 4
+          maxItems: 4
+          description: '[x1/W, y1/H, x2/W, y2/H] each clamped to [0,1].'
+          items: { type: number, format: float, minimum: 0, maximum: 1 }
+        confidence: { type: number, format: float, minimum: 0, maximum: 1 }
+
+    ErrorResponse:
+      type: object
+      required: [errorCode, message]
+      properties:
+        errorCode: { type: string }
+        message:   { type: string }
+        roomId:    { type: string, nullable: true }

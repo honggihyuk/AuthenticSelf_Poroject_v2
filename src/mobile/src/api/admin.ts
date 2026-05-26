@@ -73,3 +73,60 @@ export async function getAdminOverview(args: GetAdminOverviewArgs): Promise<Admi
   if (res.ok) return parsed as AdminOverview;
   throw new ApiError(res.status, parsed as UploadErrorBody | null);
 }
+
+// ---------------------------------------------------------------------------
+// UC-ML-PERSIST FR-11 — admin Space-detail debug view: persisted YOLO
+// detections envelope, surfaced through the existing
+// GET /api/v1/spaces/{roomId} endpoint (the `aiDetections` field).
+// ---------------------------------------------------------------------------
+
+/** One persisted YOLO detection: absolute-pixel xyxy bbox + label + score. */
+export type AiDetection = {
+  label: string;
+  bbox: [number, number, number, number]; // x1, y1, x2, y2 absolute pixels
+  confidence: number;
+};
+
+/** Self-describing envelope persisted in spaces.ai_detections. Null when the
+ *  column is NULL (pre-migration, FAILED, transport-fail, or zero objects). */
+export type AiDetectionsEnvelope = {
+  imageWidth: number;
+  imageHeight: number;
+  detections: AiDetection[];
+};
+
+/** Subset of the space-detail response the admin debug view needs. */
+export type AdminSpaceDetail = {
+  roomId: string;
+  status: string;
+  mainColor: string | null;
+  aiDetections: AiDetectionsEnvelope | null;
+};
+
+export type GetAdminSpaceDetailArgs = {
+  baseUrl: string;
+  userId: string;
+  roomId: string;
+};
+
+/**
+ * GET /api/v1/spaces/{roomId} — reused by the admin Space-detail debug view
+ * to read the persisted detections envelope. Returns the raw space body; the
+ * caller renders the bounding-box overlay from `aiDetections`.
+ */
+export async function getAdminSpaceDetail(
+  args: GetAdminSpaceDetailArgs,
+): Promise<AdminSpaceDetail> {
+  const res = await fetch(
+    `${args.baseUrl}/api/v1/spaces/${encodeURIComponent(args.roomId)}`,
+    {
+      method: 'GET',
+      headers: { 'X-User-Id': args.userId, Accept: 'application/json' },
+    },
+  );
+  const text = await res.text();
+  let parsed: unknown = null;
+  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = null; }
+  if (res.ok) return parsed as AdminSpaceDetail;
+  throw new ApiError(res.status, parsed as UploadErrorBody | null);
+}

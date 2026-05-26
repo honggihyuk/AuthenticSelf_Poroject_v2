@@ -7,7 +7,9 @@ import com.authenticself.domain.Space;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -81,7 +83,8 @@ class AIOrchestratorTest {
                 eq("r1"),
                 eq(result.dimensions()),
                 eq("#E8D9B0"),
-                eq("MODERN"));
+                eq("MODERN"),
+                anyString());
         verify(persistence, never()).markFailed(anyString());
         assertThat(StyleConfidenceCache.get("r1")).isEqualTo(0.72);
     }
@@ -104,7 +107,7 @@ class AIOrchestratorTest {
 
         assertThat(result.status()).isEqualTo("ANALYZED");
         verify(persistence, times(1)).markAnalyzed(
-                eq("r1"), eq(result.dimensions()), eq("#E8D9B0"), isNull());
+                eq("r1"), eq(result.dimensions()), eq("#E8D9B0"), isNull(), anyString());
         verify(persistence, never()).markFailed(anyString());
         assertThat(StyleConfidenceCache.get("r1")).isNull();
     }
@@ -124,7 +127,7 @@ class AIOrchestratorTest {
 
         assertThat(result.status()).isEqualTo("ANALYZED");
         verify(persistence, times(1)).markAnalyzed(
-                eq("r1"), eq(result.dimensions()), eq("#E8D9B0"), isNull());
+                eq("r1"), eq(result.dimensions()), eq("#E8D9B0"), isNull(), anyString());
         verify(persistence, never()).markFailed(anyString());
     }
 
@@ -149,6 +152,10 @@ class AIOrchestratorTest {
                 .isEqualTo(AIErrorCode.ANALYSIS_IMAGE_READ_FAILED);
 
         verify(persistence, times(1)).markFailed(eq("r1"));
+        // UC-ML-PERSIST AC-7 — analyzer failure never writes the ANALYZED row,
+        // so ai_detections stays NULL (no markAnalyzed of any arity).
+        verify(persistence, never()).markAnalyzed(
+                anyString(), anyString(), anyString(), anyString(), anyString());
         verify(persistence, never()).markAnalyzed(anyString(), anyString(), anyString(), anyString());
     }
 
@@ -172,6 +179,10 @@ class AIOrchestratorTest {
                 .extracting("code")
                 .isEqualTo(AIErrorCode.AI_SERVICE_UNAVAILABLE);
 
+        // UC-ML-PERSIST AC-7 — transport failure keeps the row PENDING and
+        // writes nothing, so ai_detections stays NULL.
+        verify(persistence, never()).markAnalyzed(
+                anyString(), anyString(), anyString(), anyString(), anyString());
         verify(persistence, never()).markAnalyzed(anyString(), anyString(), anyString(), anyString());
         verify(persistence, never()).markFailed(anyString());
     }
@@ -245,16 +256,66 @@ class AIOrchestratorTest {
     }
 
     // -----------------------------------------------------------------
+    // UC-ML-PERSIST AC-6 — happy path persists the detections envelope
+    // -----------------------------------------------------------------
+    @Test
+    @DisplayName("UC-ML-PERSIST AC-6: happy path persists ai_detections envelope with dims + detections")
+    void persistsDetectionsEnvelope() {
+        when(persistence.loadForAnalysis("r1"))
+                .thenReturn(new SpaceAnalysisPersistence.Snapshot(
+                        Space.Status.PENDING_ANALYSIS, "file:///tmp/r1.jpg"));
+        when(spaceClient.callSpaceAnalysis(eq("r1"), anyString()))
+                .thenReturn(spaceBodyWithDetections(
+                        "r1", 3.6, 4.2, 2.4, "#E8D9B0", 0.78, 142,
+                        1280, 960,
+                        List.of(new SpaceAnalysisResponse.Detection(
+                                "chair", List.of(128.0, 96.0, 256.0, 192.0), 0.9))));
+        when(styleClient.callStyleAnalysis(eq("r1"), anyString()))
+                .thenReturn(new StyleAnalysisResponse(
+                        "r1", "OK", "MODERN", 0.72, Map.of("MODERN", 0.72), 54));
+
+        orchestrator.analyze("r1");
+
+        ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
+        verify(persistence).markAnalyzed(
+                eq("r1"), anyString(), eq("#E8D9B0"), eq("MODERN"), jsonCaptor.capture());
+
+        String json = jsonCaptor.getValue();
+        assertThat(json).isNotNull();
+        assertThat(json).contains("\"imageWidth\":1280");
+        assertThat(json).contains("\"imageHeight\":960");
+        assertThat(json).contains("\"label\":\"chair\"");
+        assertThat(json).contains("\"confidence\":0.9");
+    }
+
+    // -----------------------------------------------------------------
     // helpers
     // -----------------------------------------------------------------
 
     private static SpaceAnalysisResponse spaceBody(
             String roomId, double w, double l, double h,
             String color, double confidence, int processingMs) {
+        // No detections by default (keeps the partial-success / latency tests
+        // focused on the status machine). UC-ML-PERSIST AC-6 uses the dedicated
+        // overload below.
         double area = Math.round(w * l * 100.0) / 100.0;
         return new SpaceAnalysisResponse(
                 roomId, "OK",
                 new SpaceAnalysisResponse.Dimensions(w, l, h, area),
-                color, confidence, processingMs);
+                color, confidence, processingMs,
+                1280, 960, java.util.List.of());
+    }
+
+    private static SpaceAnalysisResponse spaceBodyWithDetections(
+            String roomId, double w, double l, double h,
+            String color, double confidence, int processingMs,
+            int imageWidth, int imageHeight,
+            java.util.List<SpaceAnalysisResponse.Detection> detections) {
+        double area = Math.round(w * l * 100.0) / 100.0;
+        return new SpaceAnalysisResponse(
+                roomId, "OK",
+                new SpaceAnalysisResponse.Dimensions(w, l, h, area),
+                color, confidence, processingMs,
+                imageWidth, imageHeight, detections);
     }
 }

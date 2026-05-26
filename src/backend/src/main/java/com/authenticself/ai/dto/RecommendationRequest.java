@@ -42,10 +42,10 @@ public record RecommendationRequest(
     ) { }
 
     /**
-     * Detected object from the YOLO pipeline. For this task (FR-18 step 8)
-     * Spring always sends an empty list because the detections are not yet
-     * persisted per-row. Keeping the shape here so the Python contract
-     * does not shift when the future detection-persistence task lands.
+     * Detected object from the YOLO pipeline. Populated from the persisted
+     * {@code spaces.ai_detections} envelope (UC-ML-PERSIST FR-9): each box is
+     * normalized to {@code [0,1]} and its COCO label mapped to a catalog
+     * {@code type}. Empty list when {@code ai_detections} is null.
      */
     public record DetectedObject(
             String type,

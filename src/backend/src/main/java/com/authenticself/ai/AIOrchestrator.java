@@ -160,12 +160,18 @@ public class AIOrchestrator {
         }
 
         // ---- persist happy-path result (WRITE tx via proxy) --------------
+        // UC-ML-PERSIST FR-7 — serialize the YOLO detections envelope so the
+        // recommender (FR-9) + admin overlay (FR-11) can consume them. Null
+        // when the response carries no image dims; an empty detection list
+        // with valid dims still round-trips.
         String dimensionString = formatDimensions(spaceResponse);
+        String aiDetectionsJson = AiDetectionsCodec.toEnvelopeJson(spaceResponse);
         persistence.markAnalyzed(
                 roomId,
                 dimensionString,
                 spaceResponse.mainColor(),
-                detectedStyle);
+                detectedStyle,
+                aiDetectionsJson);
 
         // Cache the style confidence for the subsequent GET /api/v1/spaces
         // round-trip (FR-14 allows a short-lived in-memory cache).

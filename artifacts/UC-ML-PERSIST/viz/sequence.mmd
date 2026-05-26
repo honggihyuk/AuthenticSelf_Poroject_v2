@@ -1,0 +1,71 @@
+%% UC-ML-PERSIST — end-to-end detection persistence + consumption flow
+%% Legend (traceability to spec.md):
+%%   FR-2  : DimensionsEstimator re-shapes the ONE existing det.detections (dimensions.py:98) — no 2nd inference
+%%   FR-3  : /analyze/space body now carries detections[] + imageWidth + imageHeight (main.py:280)
+%%   FR-7  : AIOrchestrator builds envelope via AiDetectionsCodec.toEnvelopeJson; markAnalyzed persists spaces.ai_detections
+%%   FR-8  : FAILED / transport paths never call markAnalyzed -> ai_detections stays NULL
+%%   FR-9  : RecommendationOrchestrator.buildRequest -> AiDetectionsCodec.toDetectedObjects (normalize bbox + label->type)
+%%   FR-11 : Admin overlay reads aiDetections through existing GET /api/v1/spaces/{roomId}
+%%   AC-4  : YOLODetector.detect() invoked EXACTLY ONCE per analyze call
+%%
+%% HARD CONSTRAINT highlighted below: YOLO inference runs once (dimensions.py:98). Everything else re-shapes that result.
+
+sequenceDiagram
+    autonumber
+    actor User as 사용자 (RN client)
+    participant RN as 프론트엔드<br/>(React Native)
+    participant BE as 백엔드<br/>(Spring · AIOrchestrator)
+    participant Codec as AiDetectionsCodec<br/>(Spring · transform)
+    participant Persist as SpaceAnalysisPersistence
+    participant AI as AI 서비스<br/>(FastAPI /analyze/space)
+    participant YOLO as YOLODetector<br/>(dimensions.py:98)
+    participant DB as MySQL<br/>(spaces.ai_detections JSON)
+
+    Note over User,DB: A) Analysis — detections computed ONCE and persisted (FR-2/FR-3/FR-7)
+    User->>RN: 방 사진 업로드 (PENDING_ANALYSIS)
+    RN->>BE: 분석 트리거 (roomId)
+    BE->>Persist: loadForAnalysis(roomId) — READ tx
+    Persist-->>BE: Snapshot{status=PENDING, photoUrl}
+
+    par 병렬 팬아웃 (CompletableFuture · aiExecutor)
+        BE->>AI: POST /analyze/space {roomId, photoUrl}
+        AI->>YOLO: detect(image_path) %% AC-4: EXACTLY ONCE — the only inference
+        YOLO-->>AI: DetectionResult{detections[px], image_width, image_height}
+        Note over AI: FR-2 re-shape det.detections (no 2nd detect()),<br/>no call to /analyze/objects
+        AI-->>BE: 200 {dimensions, mainColor, confidence,<br/>imageWidth, imageHeight, detections[]} (FR-3)
+    and
+        BE->>AI: POST /analyze/style {roomId, photoUrl}
+        AI-->>BE: 200 {style, confidence} (style failure -> degraded success)
+    end
+
+    BE->>Codec: toEnvelopeJson(spaceResponse) (FR-7)
+    Codec-->>BE: {"imageWidth","imageHeight","detections":[...]} JSON (null if no dims)
+    BE->>Persist: markAnalyzed(roomId, dims, mainColor, style, aiDetectionsJson)
+    Persist->>DB: UPDATE spaces SET ai_detections=?, status=ANALYZED … (one extra column, no new round-trip)
+    DB-->>Persist: ok
+
+    Note over BE,DB: FR-8 — analyzer 422 -> markFailed (ai_detections NULL);<br/>transport fail -> stays PENDING (no markAnalyzed)
+
+    Note over User,DB: B) Recommendation — persisted detections feed the scorer (FR-9)
+    User->>RN: 추천 요청
+    RN->>BE: POST /api/v1/spaces/{roomId}/recommendations
+    BE->>DB: SELECT … ai_detections FROM spaces
+    DB-->>BE: ai_detections JSON (nullable)
+    BE->>Codec: toDetectedObjects(aiDetectionsJson) (FR-9/FR-13)
+    Note over Codec: bboxNorm = [x/W, y/H] clamp[0,1];<br/>label->type (chair->chair, bed->bed);<br/>NULL/malformed -> [] (WARN)
+    Codec-->>BE: List<DetectedObject>{type, bboxNorm, confidence}
+    BE->>AI: POST /recommend/furniture (space.detectedObjects NON-empty)
+    Note over AI: score_object_conflict -> 0.20 penalty<br/>when det.type==item.type & conf>=0.5 (AC-10)
+    AI-->>BE: 추천 결과
+    BE-->>RN: recommendations
+    RN-->>User: 추천 목록 표시
+
+    Note over User,DB: C) Admin overlay — same persisted envelope, no new endpoint (FR-11)
+    User->>RN: AdminSpaceDetailScreen 진입 (roomId)
+    RN->>BE: GET /api/v1/spaces/{roomId} (owner-scoped)
+    BE->>DB: SELECT … ai_detections
+    DB-->>BE: ai_detections JSON (nullable)
+    BE->>Codec: parseEnvelope(json) -> AiDetectionsEnvelope (null-safe)
+    Codec-->>BE: envelope | null
+    BE-->>RN: SpaceResponse{…, aiDetections}
+    RN-->>User: DetectionOverlay — bbox당 label + confidence%<br/>(null -> empty-state hint, FR-12)

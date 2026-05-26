@@ -16,7 +16,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -38,9 +37,11 @@ import java.util.regex.Pattern;
  *       (FR-14). HIT returns the cached payload verbatim (including
  *       {@code generatedAt}).</li>
  *   <li>MISS: load the full {@code furniture} catalog, build the Python
- *       request (detectedObjects is always {@code []} per FR-18 step 8),
- *       invoke {@link RecommendationClient} on the {@code aiExecutor}
- *       thread pool via {@link CompletableFuture#supplyAsync}.</li>
+ *       request (detectedObjects comes from the persisted
+ *       {@code spaces.ai_detections} envelope per UC-ML-PERSIST FR-9, or
+ *       {@code []} when the column is null), invoke {@link RecommendationClient}
+ *       on the {@code aiExecutor} thread pool via
+ *       {@link CompletableFuture#supplyAsync}.</li>
  *   <li>Cache the response on success, re-throw on failure.</li>
  * </ol>
  *
@@ -144,7 +145,9 @@ public class RecommendationOrchestrator {
         }
 
         // -----------------------------------------------------------------
-        // Step 8 — detected objects always [] (FR-18 step 8 / AC-38).
+        // Step 8 — detected objects from the persisted ai_detections envelope
+        //          (UC-ML-PERSIST FR-9). NULL/malformed JSON degrades to []
+        //          inside AiDetectionsCodec (FR-13).
         // Step 9 — build request + call Python on the aiExecutor pool.
         // -----------------------------------------------------------------
         RecommendationRequest req = buildRequest(
@@ -154,6 +157,7 @@ public class RecommendationOrchestrator {
                 space.getStyle(),            // AI-detected (nullable)
                 space.getMainColor(),
                 dim,
+                space.getAiDetections(),     // persisted YOLO envelope (nullable)
                 catalog,
                 topNPerCategory
         );
@@ -232,6 +236,7 @@ public class RecommendationOrchestrator {
             String detectedStyle,
             String mainColor,
             double[] dim,
+            String aiDetectionsJson,
             List<Furniture> catalog,
             int topNPerCategory
     ) {
@@ -239,11 +244,18 @@ public class RecommendationOrchestrator {
                 dim[0], dim[1], dim[2],
                 Math.round(dim[0] * dim[1] * 100.0) / 100.0);
 
+        // UC-ML-PERSIST FR-9 — transform the persisted YOLO envelope into the
+        // recommender DetectedObject DTO (label→type + bbox normalization).
+        // NULL / malformed JSON degrades to [] (FR-13), preserving the prior
+        // behaviour for pre-migration rows.
+        List<RecommendationRequest.DetectedObject> detectedObjects =
+                AiDetectionsCodec.toDetectedObjects(aiDetectionsJson);
+
         RecommendationRequest.Space space = new RecommendationRequest.Space(
                 dims,
                 mainColor,
                 detectedStyle,                        // may be null (FR-4)
-                Collections.emptyList()               // FR-18 step 8 — always [] for now
+                detectedObjects                       // FR-9 — persisted detections
         );
 
         List<RecommendationRequest.CatalogItem> items = new ArrayList<>(catalog.size());

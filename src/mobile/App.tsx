@@ -13,6 +13,7 @@ import ARPlacementScreen from './src/screens/ARPlacementScreen';
 import ObjectsScreen from './src/screens/ObjectsScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import AdminDashboardScreen from './src/screens/AdminDashboardScreen';
+import AdminSpaceDetailScreen from './src/screens/AdminSpaceDetailScreen';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import type { RecommendationItem } from './src/api/spaces';
 import type { PreferredStyle, Style } from './src/types/style';
@@ -44,6 +45,8 @@ export type RootStackParamList = {
   ARPlacement: { roomId: string; item: RecommendationItem };
   // Admin stack
   AdminDashboard: undefined;
+  // UC-ML-PERSIST FR-11 — admin Space-detail debug view (detection overlay).
+  AdminSpaceDetail: { roomId: string; photoUri?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -72,6 +75,11 @@ function RootNavigator() {
           name="AdminDashboard"
           component={AdminDashboardScreen}
           options={{ title: '관리자 대시보드' }}
+        />
+        <Stack.Screen
+          name="AdminSpaceDetail"
+          component={AdminSpaceDetailScreen}
+          options={{ title: '검출 디버그' }}
         />
       </Stack.Navigator>
     );

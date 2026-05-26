@@ -45,9 +45,29 @@ public class SpaceAnalysisPersistence {
      * ANALYZED and records all outputs. Nullable {@code style} supports the
      * Task-4 FR-12 "space succeeded, style failed" partial-success path —
      * callers pass {@code null} to leave {@code spaces.style} unchanged.
+     *
+     * <p>UC-ML-PERSIST FR-7 — delegates to the 5-arg overload with a
+     * {@code null} detections envelope (leaves {@code spaces.ai_detections}
+     * NULL).
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markAnalyzed(String roomId, String dimensions, String mainColor, String style) {
+        markAnalyzed(roomId, dimensions, mainColor, style, null);
+    }
+
+    /**
+     * UC-ML-PERSIST FR-7 happy-path overload: same as the 4-arg version but
+     * also persists the YOLO detections envelope onto {@code ai_detections}.
+     * <p>
+     * {@code aiDetectionsJson} is a self-describing JSON envelope
+     * {@code {imageWidth, imageHeight, detections:[...]}} produced server-side
+     * from typed objects (never user-supplied). Pass {@code null} to leave the
+     * column NULL — valid for "analysis succeeded, zero objects" as well, so a
+     * NULL or {@code []}-detection envelope both round-trip safely.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markAnalyzed(String roomId, String dimensions, String mainColor,
+                             String style, String aiDetectionsJson) {
         Space space = spaces.findById(roomId)
                 .orElseThrow(() -> new SpaceNotFoundException(roomId));
         space.setDimensions(dimensions);
@@ -55,6 +75,7 @@ public class SpaceAnalysisPersistence {
         if (style != null) {
             space.setStyle(style);
         }
+        space.setAiDetections(aiDetectionsJson);
         space.setAnalysisDate(LocalDateTime.now(ZoneOffset.UTC));
         space.setStatus(Space.Status.ANALYZED);
         spaces.save(space);

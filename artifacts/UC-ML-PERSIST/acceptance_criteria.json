@@ -1,0 +1,97 @@
+{
+  "taskId": "UC-ML-PERSIST",
+  "version": 1,
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "given": "A database at Flyway version V11",
+      "when": "Flyway applies V12__add_spaces_ai_detections.sql",
+      "then": "Migration succeeds and spaces.ai_detections exists as a JSON-typed, nullable column",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-2",
+      "given": "spaces rows that existed before V12",
+      "when": "V12 is applied",
+      "then": "Those rows still load, their ai_detections is NULL, and no existing column value changes",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-3",
+      "given": "A photo containing detectable furniture",
+      "when": "POST /analyze/space returns HTTP 200",
+      "then": "Body includes detections[] (each with label, 4-number bbox, confidence in [0,1]) plus integer imageWidth and imageHeight",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-4",
+      "given": "The /analyze/space code path with a spy on YOLODetector.detect",
+      "when": "The dimensions analyzer runs for one analyze call",
+      "then": "detect() is invoked exactly once (the existing dimensions.py:97 call), detections are populated from that same result, and no second detect() / no /analyze/objects call is introduced",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-5",
+      "given": "A photo where YOLO finds no objects",
+      "when": "POST /analyze/space returns HTTP 200",
+      "then": "detections is an empty array (not null, not absent) and imageWidth/imageHeight are still present",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-6",
+      "given": "A PENDING space and a /analyze/space response containing detections",
+      "when": "AIOrchestrator.analyze completes the happy path",
+      "then": "spaces.ai_detections for that room contains a JSON envelope with imageWidth, imageHeight, and the detection list",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-7",
+      "given": "A space-analyzer 422 (FAILED) or a transport failure (stays PENDING)",
+      "when": "Analysis runs",
+      "then": "ai_detections remains NULL and the status transition matches existing behaviour (FAILED or PENDING_ANALYSIS)",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-8",
+      "given": "An analyzed space with non-empty persisted detections",
+      "when": "A recommendation is requested",
+      "then": "RecommendationRequest.space.detectedObjects sent to Python is non-empty (not Collections.emptyList()); each item has a type, a 4-element bboxNorm with all values in [0,1], and confidence in [0,1]",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-9",
+      "given": "A persisted detection {label:'chair', bbox:[128,96,256,192], confidence:0.9} with imageWidth=1280, imageHeight=960",
+      "when": "RecommendationOrchestrator.buildRequest transforms it",
+      "then": "It emits {type:'chair', bboxNorm:[0.1,0.1,0.2,0.2], confidence:0.9} with all values within 1e-3",
+      "test_type": "unit"
+    },
+    {
+      "id": "AC-10",
+      "given": "A persisted chair detection with confidence >= 0.5 and a catalog chair item",
+      "when": "Recommendation runs against the real Python score_object_conflict",
+      "then": "The chair item's object-conflict factor is the penalty (0.20) rather than 1.00, proving the real detection signal reaches the scorer",
+      "test_type": "integration"
+    },
+    {
+      "id": "AC-11",
+      "given": "A space with persisted detections",
+      "when": "The admin Space-detail view renders",
+      "then": "One bounding box per detection is drawn over the photo at normalized coordinates (bbox/imageDims scaled to displayed image), each labelled with label + confidence%, reusing the ObjectsScreen overlay pattern",
+      "test_type": "e2e"
+    },
+    {
+      "id": "AC-12",
+      "given": "A space with ai_detections = NULL",
+      "when": "Recommendation runs and the admin view renders",
+      "then": "Recommendation succeeds with an empty detectedObjects list (today's behaviour) and the admin view shows the photo with zero boxes and an empty-state hint, with no crash",
+      "test_type": "e2e"
+    },
+    {
+      "id": "AC-13",
+      "given": "A space whose ai_detections contains malformed/legacy JSON",
+      "when": "Recommendation runs",
+      "then": "The orchestrator logs a warning and proceeds with an empty detectedObjects list instead of failing the recommendation request",
+      "test_type": "unit"
+    }
+  ]
+}

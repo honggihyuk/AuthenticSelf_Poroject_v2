@@ -8,9 +8,11 @@ sibling modules (``color.py``, ``dimensions.py``, ``style.py``).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import List, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas import DetectedObject
 
 
 class SpaceAnalysisResult(BaseModel):
@@ -34,6 +36,16 @@ class SpaceAnalysisResult(BaseModel):
 
     mainColor: str = Field(default="#000000", pattern=r"^#[0-9A-F]{6}$")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    # UC-ML-PERSIST FR-1 — the YOLO detections already computed by the
+    # dimensions analyzer (``dimensions.py``), carried out for persistence
+    # WITHOUT a second inference call. Color-only / style-only analyzers leave
+    # this empty + dims at 0; ``app.main`` reads them only off the dimensions
+    # result. ``imageWidth``/``imageHeight`` come from the same
+    # ``DetectionResult`` so downstream bbox normalization is reproducible.
+    detections: List[DetectedObject] = Field(default_factory=list)
+    imageWidth: int = Field(default=0, ge=0)
+    imageHeight: int = Field(default=0, ge=0)
 
 
 @runtime_checkable

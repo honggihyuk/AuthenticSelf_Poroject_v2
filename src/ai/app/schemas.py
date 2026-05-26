@@ -71,7 +71,15 @@ class Dimensions(BaseModel):
 
 
 class SpaceAnalysisResponse(BaseModel):
-    """Success body (HTTP 200) of ``POST /analyze/space``."""
+    """Success body (HTTP 200) of ``POST /analyze/space``.
+
+    UC-ML-PERSIST FR-3 — three additive fields surface the YOLO detections the
+    dimensions analyzer already computed (no extra inference): ``detections``
+    reuses the :class:`DetectedObject` shape verbatim, and ``imageWidth`` /
+    ``imageHeight`` let the backend normalize bboxes downstream without
+    re-reading the image. Forward references to ``DetectedObject`` are fine —
+    it is declared further down in this module and resolved at import time.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -81,6 +89,9 @@ class SpaceAnalysisResponse(BaseModel):
     mainColor: str = Field(..., pattern=r"^#[0-9A-F]{6}$")
     confidence: float = Field(..., ge=0.0, le=1.0)
     processingMs: int = Field(..., ge=0)
+    imageWidth: int = Field(..., ge=1)
+    imageHeight: int = Field(..., ge=1)
+    detections: List["DetectedObject"] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -184,3 +195,8 @@ class ErrorResponse(BaseModel):
     errorCode: str
     message: str
     roomId: Optional[str] = None
+
+
+# UC-ML-PERSIST FR-3 — resolve the forward reference in
+# ``SpaceAnalysisResponse.detections`` now that ``DetectedObject`` is defined.
+SpaceAnalysisResponse.model_rebuild()
