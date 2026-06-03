@@ -1,0 +1,16 @@
+# -----------------------------------------------------------------
+# Overrides used by @ActiveProfiles("test") integration tests (AC-22).
+# Explicitly disables the scheduled AI poller so tests that drive the
+# orchestrator directly are not raced by the background sweep.
+# -----------------------------------------------------------------
+app:
+  ai:
+    poller:
+      enabled: false
+  # UC-SECURE-AUTH FR-SEC-3 — supply a dev-only JWT secret so test
+  # contexts that do NOT explicitly assert on the fail-fast behavior
+  # can boot. The dedicated JwtSecretStartupFailureTest overrides this
+  # via @TestPropertySource to drive the unset/short cases.
+  auth:
+    jwt:
+      secret: test-secret-please-replace-in-production-32chars

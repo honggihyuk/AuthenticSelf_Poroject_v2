@@ -1,0 +1,149 @@
+spring:
+  application:
+    name: authenticself-backend
+
+  datasource:
+    # All credentials supplied via environment variables — no secrets in VCS.
+    # Example DB_URL: jdbc:mysql://localhost:3306/authenticself?useSSL=false&serverTimezone=UTC&characterEncoding=utf8mb4
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    # Flyway owns the schema — Hibernate must never mutate it.
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+    open-in-view: false
+    show-sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    validate-on-migrate: true
+
+  servlet:
+    multipart:
+      # Must be >= app.upload.max-size-bytes; max-request-size leaves a
+      # little headroom for the form envelope.
+      max-file-size: 10MB
+      max-request-size: 11MB
+
+server:
+  port: 8080
+
+logging:
+  level:
+    org.flywaydb: INFO
+    org.hibernate.SQL: INFO
+
+# ------------------------------------------------------------------
+# UC-01-photo-upload — FR-8 configuration surface (AC-21).
+# Every key is env-overridable because @Value / @ConfigurationProperties
+# respect the standard Spring property-source chain.
+# ------------------------------------------------------------------
+app:
+  # UC-SECURE-AUTH FR-SEC-1 / FR-CORS-1 / FR-SEC-3 — secrets and CORS.
+  # `auth.jwt.secret` has NO default — fail-fast on startup if the env
+  # var is missing or shorter than 32 bytes (see JwtService and
+  # docs/deployment/env.md).
+  auth:
+    jwt:
+      secret: ${APP_AUTH_JWT_SECRET}
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:8082,http://localhost:8081}
+
+  storage:
+    local:
+      root: ${APP_STORAGE_LOCAL_ROOT:./var/object-storage}
+  upload:
+    max-size-bytes: ${APP_UPLOAD_MAX_SIZE_BYTES:10485760}
+    min-width:      ${APP_UPLOAD_MIN_WIDTH:640}
+    min-height:     ${APP_UPLOAD_MIN_HEIGHT:480}
+    allowed-content-types: ${APP_UPLOAD_ALLOWED_CONTENT_TYPES:image/jpeg,image/png,image/webp}
+
+  # ------------------------------------------------------------------
+  # UC-01-space-analysis + UC-01-style-selection — configuration surface
+  # (Task 3 FR-16 / AC-21, Task 4 FR-16 / AC-34).
+  # All keys env-overridable.
+  # ------------------------------------------------------------------
+  ai:
+    space:
+      base-url:           ${APP_AI_SPACE_BASE_URL:http://localhost:8001}
+      connect-timeout-ms: ${APP_AI_SPACE_CONNECT_TIMEOUT_MS:2000}
+      read-timeout-ms:    ${APP_AI_SPACE_READ_TIMEOUT_MS:10000}
+    # UC-01-style-selection — Task-4 FR-16 (AC-34).
+    # base-url defaults to the same FastAPI process as `space` (the Python
+    # service exposes both routes on port 8001 in dev).
+    style:
+      base-url:           ${APP_AI_STYLE_BASE_URL:http://localhost:8001}
+      connect-timeout-ms: ${APP_AI_STYLE_CONNECT_TIMEOUT_MS:2000}
+      read-timeout-ms:    ${APP_AI_STYLE_READ_TIMEOUT_MS:10000}
+    # base-url alias used by SpaceAnalysisClient + AnalysisPoller.
+    base-url:          ${APP_AI_BASE_URL:http://localhost:8001}
+    connect-timeout-ms: ${APP_AI_CONNECT_TIMEOUT_MS:2000}
+    read-timeout-ms:    ${APP_AI_READ_TIMEOUT_MS:10000}
+    # Task-4 FR-16 / FR-11 — dedicated executor for the parallel space+style
+    # fan-out. Keys match the nested shape the spec calls out (AC-34).
+    orchestrator:
+      executor:
+        core-size:      ${APP_AI_EXECUTOR_CORE_SIZE:2}
+        max-size:       ${APP_AI_EXECUTOR_MAX_SIZE:8}
+        queue-capacity: ${APP_AI_EXECUTOR_QUEUE_CAPACITY:64}
+    # Flat aliases so `@Value("${app.ai.executor.core-size}")` also resolves.
+    executor:
+      core-size:      ${APP_AI_EXECUTOR_CORE_SIZE:2}
+      max-size:       ${APP_AI_EXECUTOR_MAX_SIZE:8}
+      queue-capacity: ${APP_AI_EXECUTOR_QUEUE_CAPACITY:64}
+    poller:
+      enabled:      ${APP_AI_POLLER_ENABLED:true}
+      interval-ms:  ${APP_AI_POLLER_INTERVAL_MS:15000}
+      fixed-delay-ms: ${APP_AI_POLLER_FIXED_DELAY_MS:15000}
+      batch-size:   ${APP_AI_POLLER_BATCH_SIZE:10}
+      max-attempts: ${APP_AI_POLLER_MAX_ATTEMPTS:3}
+    # UC-01-recommendation (Task 5) FR-21 / AC-43. base-url defaults to
+    # the same FastAPI process as /analyze/space and /analyze/style.
+    recommend:
+      base-url:           ${APP_AI_RECOMMEND_BASE_URL:http://localhost:8001}
+      connect-timeout-ms: ${APP_AI_RECOMMEND_CONNECT_TIMEOUT_MS:2000}
+      read-timeout-ms:    ${APP_AI_RECOMMEND_READ_TIMEOUT_MS:15000}
+
+  # UC-01-recommendation (Task 5) FR-21 / AC-43 — recommendation cache
+  # and default top-N.
+  recommendation:
+    cache:
+      ttl-seconds:  ${APP_RECOMMENDATION_CACHE_TTL_SECONDS:600}
+      max-entries:  ${APP_RECOMMENDATION_CACHE_MAX_ENTRIES:1024}
+    default-top-n:  ${APP_RECOMMENDATION_DEFAULT_TOP_N:3}
+
+  # ------------------------------------------------------------------
+  # UC-02-wishlist (Task 6) FR-12 / AC-32 — soft cap on the list
+  # endpoint's response size. Beyond this, GET /api/v1/wishlist returns
+  # the N most-recently-updated rows + {"truncated": true}. Insert is
+  # NEVER rejected based on this cap (it's a response-size limit, not a
+  # quota). Override via WISHLIST_MAX_ITEMS_PER_USER or the Spring
+  # property key directly.
+  # ------------------------------------------------------------------
+  wishlist:
+    max-items-per-user: ${WISHLIST_MAX_ITEMS_PER_USER:500}
+
+  # ------------------------------------------------------------------
+  # UC-03-admin-overview (Task 7) FR-14 / AC-42 / AC-49 — configuration
+  # surface for the admin aggregation endpoints.
+  #
+  # - time-zone: drives the `Asia/Seoul`-aligned window math, the Clock
+  #   bean defined in TimeConfig, and the `+09:00` offset on every
+  #   generatedAt field (FR-10 / AC-32 / AC-53).
+  # - top-colors-limit: bounds the length of the mainColorTop5 array in
+  #   GET /api/v1/admin/rooms (FR-6 / AC-19 / AC-49).
+  #
+  # Both keys are env-overridable via the standard Spring chain.
+  # ------------------------------------------------------------------
+  admin:
+    time-zone:         ${ADMIN_TIME_ZONE:Asia/Seoul}
+    top-colors-limit:  ${ADMIN_TOP_COLORS_LIMIT:5}

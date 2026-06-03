@@ -1,0 +1,7 @@
+# Local-only secret overrides. gitignored — never commit.
+# Activated by SPRING_PROFILES_ACTIVE=local at bootRun.
+
+app:
+  naver:
+    client-id:     NcDjkjGpFl7se6AuO92M
+    client-secret: qtz4l4VwaO

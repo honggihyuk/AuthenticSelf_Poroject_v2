@@ -1,0 +1,19 @@
+# Phase B — local-only secret overrides.
+#
+# Copy to application-local.yml (same dir) and fill in the placeholders.
+# application-local.yml is gitignored — never commit real keys.
+#
+# Activate by setting SPRING_PROFILES_ACTIVE=local before bootRun:
+#
+#   $env:SPRING_PROFILES_ACTIVE="local"
+#   $env:DB_URL="jdbc:mysql://localhost:3306/authentic_db?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8"
+#   $env:DB_USER="root"; $env:DB_PASSWORD="rootroot"
+#   .\gradlew.bat bootRun --no-daemon --args="--server.port=18080"
+#
+# Once the backend is up, trigger the batch immediately:
+#   curl -X POST http://localhost:18080/api/v1/admin/similar-products/refresh
+
+app:
+  naver:
+    client-id:     REPLACE_WITH_YOUR_NAVER_CLIENT_ID
+    client-secret: REPLACE_WITH_YOUR_NAVER_CLIENT_SECRET
