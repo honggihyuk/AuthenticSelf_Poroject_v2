@@ -369,19 +369,6 @@ function ItemCard({
             accessibilityLabel="위시리스트에 추가"
           />
         </View>
-        <View style={styles.actionsGap} />
-        <View style={styles.actionsCol}>
-          <Button
-            testID={`btn-ar-${item.furnitureId}`}
-            label="AR로 배치"
-            variant="primary"
-            size="md"
-            fullWidth
-            onPress={() => navigation.navigate('ARPlacement', { roomId, item })}
-            labelStyle={styles.actionBtnLabel}
-            accessibilityLabel="AR로 배치"
-          />
-        </View>
       </View>
 
       <View testID={`similar-${item.furnitureId}`} style={styles.similarBlock}>
@@ -489,7 +476,6 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
   },
   actionsCol: { flex: 1 },
-  actionsGap: { width: spacing.sm },
   actionBtnLabel: { fontSize: 14 },
 
   similarBlock: {

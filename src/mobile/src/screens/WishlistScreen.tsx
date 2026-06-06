@@ -56,9 +56,30 @@ type Tab = 'active' | 'purchased';
 function showToast(msg: string): void {
   if (Platform.OS === 'android' && ToastAndroid) {
     ToastAndroid.show(msg, ToastAndroid.SHORT);
+  } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    // react-native-web's Alert.alert is a no-op, so use the DOM dialog.
+    window.alert(msg);
   } else {
     Alert.alert('', msg);
   }
+}
+
+/**
+ * Cross-platform confirm dialog. react-native-web's `Alert.alert` is a
+ * complete no-op — it ignores the button array, so the "확인" `onPress`
+ * never fires and actions (구매 완료 전환 / 삭제) silently do nothing on web.
+ * Use the DOM `window.confirm` on web; keep the native two-button Alert
+ * on iOS/Android.
+ */
+function confirmAction(message: string, onConfirm: () => void): void {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && window.confirm(message)) onConfirm();
+    return;
+  }
+  Alert.alert(message, undefined, [
+    { text: '취소', style: 'cancel' },
+    { text: '확인', onPress: onConfirm },
+  ]);
 }
 
 function formatKrw(v: number): string {
@@ -120,80 +141,68 @@ export default function WishlistScreen(_props: Props) {
       const target = item.status === 'Active' ? 'PURCHASED' : 'ACTIVE';
       const confirmMsg =
         target === 'PURCHASED' ? '구매 완료로 표시할까요?' : '보관 중 상태로 되돌릴까요?';
-      Alert.alert(confirmMsg, undefined, [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '확인',
-          onPress: async () => {
-            try {
-              const updated = await updateWishlistState({
-                baseUrl: settings.apiBaseUrl,
-                userId: settings.userId,
-                wishlistId: item.wishlistId,
-                status: target,
-              });
-              setResp((prev) => {
-                if (!prev) return prev;
-                const remaining = prev.items.filter((i) => i.wishlistId !== item.wishlistId);
-                const next = [updated, ...remaining];
-                return {
-                  ...prev,
-                  items: next,
-                  totalActive: next.filter((i) => i.status === 'Active').length,
-                  totalPurchased: next.filter((i) => i.status === 'Purchased').length,
-                };
-              });
-              if (target === 'PURCHASED') setTab('purchased');
-              else setTab('active');
-            } catch (e) {
-              if (isWishlistItemNotFound(e)) {
-                showToast('이미 삭제된 항목이에요.');
-                void fetchOnce();
-              } else {
-                showToast('상태를 변경하지 못했어요.');
-              }
-            }
-          },
-        },
-      ]);
+      confirmAction(confirmMsg, async () => {
+        try {
+          const updated = await updateWishlistState({
+            baseUrl: settings.apiBaseUrl,
+            userId: settings.userId,
+            wishlistId: item.wishlistId,
+            status: target,
+          });
+          setResp((prev) => {
+            if (!prev) return prev;
+            const remaining = prev.items.filter((i) => i.wishlistId !== item.wishlistId);
+            const next = [updated, ...remaining];
+            return {
+              ...prev,
+              items: next,
+              totalActive: next.filter((i) => i.status === 'Active').length,
+              totalPurchased: next.filter((i) => i.status === 'Purchased').length,
+            };
+          });
+          if (target === 'PURCHASED') setTab('purchased');
+          else setTab('active');
+        } catch (e) {
+          if (isWishlistItemNotFound(e)) {
+            showToast('이미 삭제된 항목이에요.');
+            void fetchOnce();
+          } else {
+            showToast('상태를 변경하지 못했어요.');
+          }
+        }
+      });
     },
     [fetchOnce],
   );
 
   const onDelete = useCallback(
     async (item: WishlistItem) => {
-      Alert.alert('위시리스트에서 삭제할까요?', undefined, [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '확인',
-          onPress: async () => {
-            try {
-              await deleteWishlistItem({
-                baseUrl: settings.apiBaseUrl,
-                userId: settings.userId,
-                wishlistId: item.wishlistId,
-              });
-              setResp((prev) => {
-                if (!prev) return prev;
-                const next = prev.items.filter((i) => i.wishlistId !== item.wishlistId);
-                return {
-                  ...prev,
-                  items: next,
-                  totalActive: next.filter((i) => i.status === 'Active').length,
-                  totalPurchased: next.filter((i) => i.status === 'Purchased').length,
-                };
-              });
-            } catch (e) {
-              if (isWishlistItemNotFound(e)) {
-                showToast('이미 삭제된 항목이에요.');
-                void fetchOnce();
-              } else {
-                showToast('삭제하지 못했어요.');
-              }
-            }
-          },
-        },
-      ]);
+      confirmAction('위시리스트에서 삭제할까요?', async () => {
+        try {
+          await deleteWishlistItem({
+            baseUrl: settings.apiBaseUrl,
+            userId: settings.userId,
+            wishlistId: item.wishlistId,
+          });
+          setResp((prev) => {
+            if (!prev) return prev;
+            const next = prev.items.filter((i) => i.wishlistId !== item.wishlistId);
+            return {
+              ...prev,
+              items: next,
+              totalActive: next.filter((i) => i.status === 'Active').length,
+              totalPurchased: next.filter((i) => i.status === 'Purchased').length,
+            };
+          });
+        } catch (e) {
+          if (isWishlistItemNotFound(e)) {
+            showToast('이미 삭제된 항목이에요.');
+            void fetchOnce();
+          } else {
+            showToast('삭제하지 못했어요.');
+          }
+        }
+      });
     },
     [fetchOnce],
   );
