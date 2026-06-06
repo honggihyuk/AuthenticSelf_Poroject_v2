@@ -16,7 +16,7 @@
  * dependency (mirrors `spaces.ts` / AC-35 rationale).
  */
 
-import { ApiError } from './client';
+import { ApiError, bearerHeader } from './client';
 
 // ---------------------------------------------------------------------------
 // Types — mirror the Spring-public contract (FR-5..FR-7 + api_contract.yaml).
@@ -90,6 +90,7 @@ export async function addToWishlist(opts: AddOpts): Promise<AddWishlistResponse>
     method: 'POST',
     headers: {
       'X-User-Id': userId,
+      ...bearerHeader(),
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
@@ -112,7 +113,7 @@ export async function getWishlist(opts: ListOpts): Promise<ListWishlistResponse>
   const qs = status ? `?status=${encodeURIComponent(status)}` : '';
   const res = await fetch(`${baseUrl}/api/v1/wishlist${qs}`, {
     method: 'GET',
-    headers: { 'X-User-Id': userId, Accept: 'application/json' },
+    headers: { 'X-User-Id': userId, ...bearerHeader(), Accept: 'application/json' },
   });
   const parsed = await parseJsonOrThrow(res);
   return assertListResponse(parsed);
@@ -135,6 +136,7 @@ export async function updateWishlistState(opts: PatchOpts): Promise<WishlistItem
     method: 'PATCH',
     headers: {
       'X-User-Id': userId,
+      ...bearerHeader(),
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
@@ -159,7 +161,7 @@ export async function deleteWishlistItem(opts: DeleteOpts): Promise<void> {
   const { baseUrl, userId, wishlistId } = opts;
   const res = await fetch(`${baseUrl}/api/v1/wishlist/${encodeURIComponent(wishlistId)}`, {
     method: 'DELETE',
-    headers: { 'X-User-Id': userId, Accept: 'application/json' },
+    headers: { 'X-User-Id': userId, ...bearerHeader(), Accept: 'application/json' },
   });
   if (res.ok) return;
   const text = await res.text();

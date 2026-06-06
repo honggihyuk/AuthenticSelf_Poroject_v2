@@ -8,6 +8,9 @@
  * case rather than treating it as an error.
  */
 
+import { settings } from '../settings';
+import { bearerHeader } from './client';
+
 export type SimilarProduct = {
   source: string;            // 'NAVER'
   externalId: string;
@@ -34,7 +37,10 @@ type GetSimilarArgs = {
 export async function getFurnitureSimilar(opts: GetSimilarArgs): Promise<SimilarProductsResponse> {
   const { baseUrl, furnitureId } = opts;
   const url = `${baseUrl}/api/v1/furniture/${encodeURIComponent(furnitureId)}/similar`;
-  const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { 'X-User-Id': settings.userId, ...bearerHeader(), Accept: 'application/json' },
+  });
   if (!res.ok) {
     throw new Error(`getFurnitureSimilar failed: ${res.status}`);
   }

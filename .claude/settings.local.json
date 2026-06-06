@@ -239,7 +239,8 @@
       "PowerShell($env:AI_PHOTO_ROOT=\"C:\\\\Users\\\\82104\\\\Documents\\\\GitHub\\\\AuthenticSelf_Poroject_v2\\\\src\\\\backend\\\\var\\\\object-storage\"; Push-Location src\\\\ai; .\\\\.venv\\\\Scripts\\\\python.exe -m uvicorn app.main:app --port 8001 --host 0.0.0.0; Pop-Location)",
       "PowerShell($body = @{ username = 'admin'; password = '1234' } | ConvertTo-Json -Compress; $r = Invoke-RestMethod -Uri 'http://localhost:18080/api/v1/auth/login' -Method Post -Body $body -ContentType 'application/json'; $r | ConvertTo-Json -Compress; Write-Output '---'; try { Invoke-RestMethod -Uri 'http://localhost:18080/api/v1/auth/login' -Method Post -Body \\(@{username='admin';password='wrong'}|ConvertTo-Json -Compress\\) -ContentType 'application/json' } catch { $_.ErrorDetails.Message })",
       "PowerShell(try { Invoke-RestMethod -Uri 'http://localhost:18080/api/v1/admin/overview?window=LAST_30_DAYS' -Headers @{'X-User-Id'='admin'} -Method Get } catch { Write-Output \"STATUS: $\\($_.Exception.Response.StatusCode\\)\"; Write-Output $_.ErrorDetails.Message })",
-      "Bash(xargs cat)"
+      "Bash(xargs cat)",
+      "PowerShell($ports = 3306,8001,18080,8082; foreach \\($p in $ports\\) { $c = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $proc = \\(Get-Process -Id $c[0].OwningProcess -ErrorAction SilentlyContinue\\).ProcessName; \"$p : LISTENING \\($proc\\)\" } else { \"$p : free\" } })"
     ]
   }
 }

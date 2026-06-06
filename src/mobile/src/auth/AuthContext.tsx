@@ -50,9 +50,14 @@ function readPersisted(): AuthState | null {
   return null;
 }
 
-/** Mirror the userId into the legacy `settings.userId` slot read by existing screens. */
-function syncUserIdToSettings(userId: string): void {
+/**
+ * Mirror the session into the mutable `settings` globals read by the api
+ * layer: `userId` (X-User-Id header) and `token` (Authorization: Bearer).
+ * Pass empty strings on logout to clear both.
+ */
+function syncAuthToSettings(userId: string, token: string): void {
   settings.userId = userId;
+  settings.token = token;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -60,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // AuthStack vs UserStack/AdminStack — avoids a login-screen flash on reload.
   const [state, setState] = useState<AuthState | null>(() => {
     const restored = readPersisted();
-    if (restored) syncUserIdToSettings(restored.userId);
+    if (restored) syncAuthToSettings(restored.userId, restored.token);
     return restored;
   });
 
@@ -77,13 +82,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name:   resp.name,
     };
     saveItem(STORAGE_KEY, JSON.stringify(next));
-    syncUserIdToSettings(next.userId);
+    syncAuthToSettings(next.userId, next.token);
     setState(next);
   }, []);
 
   const logout = useCallback(() => {
     removeItem(STORAGE_KEY);
-    syncUserIdToSettings('');
+    syncAuthToSettings('', '');
     setState(null);
   }, []);
 

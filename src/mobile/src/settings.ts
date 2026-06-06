@@ -28,4 +28,9 @@ function resolveWebBaseUrl(): string {
 export const settings = {
   apiBaseUrl: resolveWebBaseUrl(),
   userId: '' as string,
+  // JWT mirrored here by AuthContext on login (cleared on logout) so the api
+  // layer can attach `Authorization: Bearer <token>` without a per-screen
+  // refactor — same rationale as `userId` above. Backend's JwtAuthFilter
+  // requires this header on every /api/v1/** call except login.
+  token: '' as string,
 };

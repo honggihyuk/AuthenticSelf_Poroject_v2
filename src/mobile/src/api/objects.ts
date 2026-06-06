@@ -4,6 +4,8 @@
  * `/analyze/objects` YOLO endpoint.
  */
 
+import { bearerHeader } from './client';
+
 export type DetectedObject = {
   label: string;
   bbox: [number, number, number, number];   // x1, y1, x2, y2 in absolute pixels
@@ -30,7 +32,7 @@ export async function getRoomObjects(opts: GetObjectsArgs): Promise<ObjectsRespo
   const url = `${baseUrl}/api/v1/spaces/${encodeURIComponent(roomId)}/objects`;
   const res = await fetch(url, {
     method: 'GET',
-    headers: { 'X-User-Id': userId, Accept: 'application/json' },
+    headers: { 'X-User-Id': userId, ...bearerHeader(), Accept: 'application/json' },
   });
   if (!res.ok) {
     const body = await res.text();

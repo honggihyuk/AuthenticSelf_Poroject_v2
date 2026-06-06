@@ -1,4 +1,4 @@
-import { ApiError, type UploadErrorBody } from './client';
+import { ApiError, bearerHeader, type UploadErrorBody } from './client';
 
 export type AdminWindow = 'LAST_7D' | 'LAST_30D' | 'ALL';
 
@@ -64,7 +64,7 @@ export async function getAdminOverview(args: GetAdminOverviewArgs): Promise<Admi
     `${args.baseUrl}/api/v1/admin/overview?window=${encodeURIComponent(w)}`,
     {
       method: 'GET',
-      headers: { 'X-User-Id': args.userId, Accept: 'application/json' },
+      headers: { 'X-User-Id': args.userId, ...bearerHeader(), Accept: 'application/json' },
     },
   );
   const text = await res.text();

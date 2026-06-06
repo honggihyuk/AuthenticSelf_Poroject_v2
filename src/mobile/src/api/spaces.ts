@@ -15,7 +15,7 @@
  * schema-validation library required per the spec.
  */
 
-import { ApiError } from './client';
+import { ApiError, bearerHeader } from './client';
 import type { PreferredStyle, Style } from '../types/style';
 
 // ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ export async function getRecommendations(
   const url = `${baseUrl}/api/v1/spaces/${encodeURIComponent(roomId)}/recommendations${qs}`;
   const res = await fetch(url, {
     method: 'GET',
-    headers: { 'X-User-Id': userId, Accept: 'application/json' },
+    headers: { 'X-User-Id': userId, ...bearerHeader(), Accept: 'application/json' },
   });
   const text = await res.text();
   let parsed: unknown = null;

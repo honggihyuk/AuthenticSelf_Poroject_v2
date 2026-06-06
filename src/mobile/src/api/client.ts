@@ -12,7 +12,19 @@
 
 import { Platform } from 'react-native';
 
+import { settings } from '../settings';
 import type { PreferredStyle, Style } from '../types/style';
+
+/**
+ * Authorization header for the logged-in user. The backend's JwtAuthFilter
+ * requires `Authorization: Bearer <jwt>` (matching `X-User-Id`) on every
+ * `/api/v1/**` call except login. Returns an empty object when there is no
+ * active session, so unauthenticated callers stay unaffected. Used by every
+ * api module (client/spaces/wishlist/objects/admin) alongside `X-User-Id`.
+ */
+export function bearerHeader(): Record<string, string> {
+  return settings.token ? { Authorization: `Bearer ${settings.token}` } : {};
+}
 
 export type UploadSuccess = {
   roomId: string;
@@ -88,6 +100,8 @@ export async function uploadPhoto(args: UploadPhotoArgs): Promise<UploadSuccess>
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${baseUrl}/api/v1/spaces/photo`);
     xhr.setRequestHeader('X-User-Id', userId);
+    const auth = bearerHeader();
+    if (auth.Authorization) xhr.setRequestHeader('Authorization', auth.Authorization);
 
     if (xhr.upload && onProgress) {
       xhr.upload.onprogress = (ev: ProgressEvent) => {
@@ -138,7 +152,7 @@ export async function getSpace(opts: JsonRequestOpts): Promise<SpaceState> {
   const url = `${baseUrl}/api/v1/spaces/${encodeURIComponent(roomId)}`;
   const res = await fetch(url, {
     method: 'GET',
-    headers: { 'X-User-Id': userId, Accept: 'application/json' },
+    headers: { 'X-User-Id': userId, ...bearerHeader(), Accept: 'application/json' },
   });
   return parseJsonOrThrow<SpaceState>(res);
 }
@@ -155,6 +169,7 @@ export async function setPreferredStyle(
     method: 'PUT',
     headers: {
       'X-User-Id': userId,
+      ...bearerHeader(),
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
